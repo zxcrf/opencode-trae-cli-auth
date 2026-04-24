@@ -1,0 +1,55 @@
+{
+  "name": "opencode-trae-cli-auth",
+  "version": "0.1.0",
+  "description": "opencode provider plugin that proxies models through the local Trae CLI",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./dist/index.js",
+    "./provider": "./dist/provider.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm test && npm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "^3.0.8",
+    "@opencode-ai/plugin": "^1.2.27"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.15"
+  },
+  "license": "MIT",
+  "keywords": [
+    "opencode",
+    "trae",
+    "traecli",
+    "provider",
+    "plugin",
+    "ai-sdk"
+  ],
+  "homepage": "https://github.com/qqz/opencode-trae-cli-auth#readme",
+  "bugs": {
+    "url": "https://github.com/qqz/opencode-trae-cli-auth/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qqz/opencode-trae-cli-auth.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

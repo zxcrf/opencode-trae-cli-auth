@@ -1,0 +1,24 @@
+import { describe, expect, it } from 'vitest'
+import { DEFAULT_MODEL_ID, TRAE_CLOUD_MODEL_IDS, TRAE_MODELS, getModelById } from '../src/models.js'
+
+describe('trae models', () => {
+  it('exposes a default model with tool calls disabled', () => {
+    expect(DEFAULT_MODEL_ID).toBe('default')
+    expect(TRAE_MODELS.default).toBeDefined()
+    expect(TRAE_MODELS.default.tool_call).toBe(false)
+  })
+
+  it('returns model by id', () => {
+    expect(getModelById('default')?.name).toContain('Trae')
+  })
+
+  it('exposes known Trae cloud model ids discovered from /model', () => {
+    expect(TRAE_CLOUD_MODEL_IDS).toContain('Doubao-Seed-2.0-Code')
+    expect(TRAE_CLOUD_MODEL_IDS).toContain('GLM-5.1')
+    expect(TRAE_CLOUD_MODEL_IDS).toContain('DeepSeek-V3.1-Terminus')
+    for (const id of TRAE_CLOUD_MODEL_IDS) {
+      expect(TRAE_MODELS[id]?.id).toBe(id)
+      expect(TRAE_MODELS[id]?.tool_call).toBe(false)
+    }
+  })
+})

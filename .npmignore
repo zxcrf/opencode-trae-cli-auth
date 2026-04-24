@@ -1,0 +1,10 @@
+src/
+tests/
+node_modules/
+coverage/
+*.tgz
+.git/
+.github/
+.DS_Store
+tsconfig.json
+*.tsbuildinfo
