@@ -226,6 +226,18 @@ Optional soak test (success rate + latency summary):
 bun run soak -- --model trae/default --runs 12 --concurrency 3
 ```
 
+Tool-calling smoke (reports whether `tool-call` events are observed):
+
+```bash
+bun run smoke:tools -- --model trae/coding
+```
+
+Strict mode (non-zero exit if no `tool-call` event):
+
+```bash
+bun run smoke:tools -- --model trae/coding --strict
+```
+
 
 ## Trae CLI env helper
 
