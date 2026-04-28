@@ -546,4 +546,133 @@ describe('TraeLanguageModel', () => {
       input: '{"pattern":"TODO","include":"*.ts"}',
     })
   })
+
+  it('normalizes write input aliases into filePath+content', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'write file' }] }],
+      tools: [
+        {
+          type: 'function',
+          name: 'write',
+          description: 'Write file',
+          inputSchema: { type: 'object', properties: { filePath: { type: 'string' }, content: { type: 'string' } } },
+        },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-write-1',
+                    type: 'function',
+                    function: { name: 'write', arguments: '{"path":"README.md","text":"hello"}' },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'writing' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-write-1',
+      toolName: 'write',
+      input: '{"path":"README.md","content":"hello","filePath":"README.md"}',
+    })
+  })
+
+  it('normalizes edit alias fields into oldString/newString/replaceAll', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'edit file' }] }],
+      tools: [
+        {
+          type: 'function',
+          name: 'edit',
+          description: 'Edit file',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string' },
+              oldString: { type: 'string' },
+              newString: { type: 'string' },
+              replaceAll: { type: 'boolean' },
+            },
+          },
+        },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-edit-2',
+                    type: 'function',
+                    function: {
+                      name: 'edit',
+                      arguments: '{"file_path":"README.md","find":"foo","replace":"bar","all":"true"}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'editing alias' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-edit-2',
+      toolName: 'edit',
+      input: '{"filePath":"README.md","oldString":"foo","newString":"bar","replaceAll":true}',
+    })
+  })
 })

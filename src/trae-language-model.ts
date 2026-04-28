@@ -278,16 +278,52 @@ function normalizeToolInputObject(toolName: string, input: Record<string, unknow
       return next
     }
     case 'write':
-    case 'writefile':
-      return renameKeys(input, { file_path: 'filePath' })
+    case 'writefile': {
+      const next = renameKeys(input, { file_path: 'filePath' })
+      const content = pickString(next.content)
+        ?? pickString(next.text)
+        ?? pickString(next.data)
+        ?? pickString(next.body)
+        ?? pickString(next.value)
+      if (content !== undefined) next.content = content
+      delete next.text
+      delete next.data
+      delete next.body
+      delete next.value
+      return next
+    }
     case 'edit':
-    case 'str_replace_based_edit_tool':
-      return renameKeys(input, {
+    case 'str_replace_based_edit_tool': {
+      const next = renameKeys(input, {
         file_path: 'filePath',
         old_string: 'oldString',
         new_string: 'newString',
         replace_all: 'replaceAll',
       })
+      const oldString = pickString(next.oldString)
+        ?? pickString(next.oldText)
+        ?? pickString(next.find)
+        ?? pickString(next.search)
+      const newString = pickString(next.newString)
+        ?? pickString(next.newText)
+        ?? pickString(next.replace)
+        ?? pickString(next.replacement)
+      if (oldString !== undefined) next.oldString = oldString
+      if (newString !== undefined) next.newString = newString
+      const replaceAll = pickBoolean(next.replaceAll)
+        ?? pickBoolean(next.all)
+        ?? pickBoolean(next.global)
+      if (replaceAll !== undefined) next.replaceAll = replaceAll
+      delete next.oldText
+      delete next.newText
+      delete next.find
+      delete next.search
+      delete next.replace
+      delete next.replacement
+      delete next.all
+      delete next.global
+      return next
+    }
     case 'grep': {
       const next = renameKeys(input, {})
       if (!pickString(next.include)) {
@@ -365,6 +401,16 @@ function pickNumber(value: unknown): number | undefined {
   if (typeof value === 'string' && value.trim()) {
     const parsed = Number(value)
     if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function pickBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const lower = value.trim().toLowerCase()
+    if (lower === 'true') return true
+    if (lower === 'false') return false
   }
   return undefined
 }
