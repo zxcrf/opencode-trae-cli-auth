@@ -16,7 +16,7 @@ describe('prompt builder', () => {
     expect(prompt).toContain('<user>\ncontinue\n</user>')
   })
 
-  it('preserves prior tool calls and tool results as plain history', () => {
+  it('omits prior tool calls and tool results by default', () => {
     const prompt = buildPrompt([
       {
         role: 'assistant',
@@ -41,6 +41,36 @@ describe('prompt builder', () => {
         ],
       },
     ] as any)
+
+    expect(prompt).not.toContain('<tool_call id="call-1" name="read">')
+    expect(prompt).not.toContain('<tool_result id="call-1" name="read">')
+  })
+
+  it('can preserve prior tool calls and tool results when enabled', () => {
+    const prompt = buildPrompt([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            input: { filePath: 'README.md' },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            output: { type: 'text', value: 'contents' },
+          },
+        ],
+      },
+    ] as any, { includeToolHistory: true })
 
     expect(prompt).toContain('<tool_call id="call-1" name="read">')
     expect(prompt).toContain('"filePath":"README.md"')

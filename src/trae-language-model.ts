@@ -20,6 +20,7 @@ export type TraeProviderOptions = {
   cliPath?: string
   modelName?: string
   queryTimeout?: number
+  includeToolHistory?: boolean
   extraArgs?: string[]
   enforceTextOnly?: boolean
   maxRetries?: number
@@ -120,7 +121,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
           const result = await runCliLlm({
             cliPath,
             modelName: this.providerOptions?.modelName ?? (this.modelId === 'default' ? undefined : this.modelId),
-            prompt: buildPromptFromOptions(options),
+            prompt: buildPromptFromOptions(options, { includeToolHistory: this.providerOptions?.includeToolHistory }),
             queryTimeout: this.providerOptions?.queryTimeout,
             extraArgs: this.providerOptions?.extraArgs,
             enforceTextOnly: this.providerOptions?.enforceTextOnly,

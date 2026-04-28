@@ -40,6 +40,7 @@ describe('TraeProviderPlugin', () => {
     const hooks = await pluginModule.TraeProviderPlugin({
       cliPath: '/custom/traecli',
       queryTimeout: 33,
+      includeToolHistory: false,
       enforceTextOnly: true,
       maxRetries: 2,
       retryDelayMs: 400,
@@ -58,6 +59,7 @@ describe('TraeProviderPlugin', () => {
     expect(config.provider?.trae?.options).toMatchObject({
       cliPath: '/custom/traecli',
       queryTimeout: 33,
+      includeToolHistory: false,
       enforceTextOnly: true,
       maxRetries: 2,
       retryDelayMs: 400,

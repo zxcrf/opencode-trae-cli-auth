@@ -98,6 +98,39 @@ describe('TraeLanguageModel', () => {
     expect(parts.find((p) => p.type === 'finish').usage).toMatchObject({ inputTokens: 10, outputTokens: 2, totalTokens: 12 })
   })
 
+  it('omits tool history from prompt by default', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli' })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: '1', toolName: 'read', input: { path: 'a' } }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: '1', toolName: 'read', output: { type: 'text', value: 'ok' } }] },
+        { role: 'user', content: [{ type: 'text', text: 'ping' }] },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      closeChild(child)
+    })
+    for await (const _ of (await streamPromise).stream as any) {}
+
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args[0]).not.toContain('<tool_call')
+    expect(args[0]).not.toContain('<tool_result')
+  })
+
   it('doGenerate delegates to doStream', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()

@@ -1,31 +1,36 @@
 import type { LanguageModelV2CallOptions, LanguageModelV2Message, LanguageModelV2Prompt } from '@ai-sdk/provider'
 
-export function buildPromptFromOptions(options: LanguageModelV2CallOptions): string {
-  return buildPrompt(options.prompt)
+type PromptBuildOptions = {
+  includeToolHistory?: boolean
 }
 
-export function buildPrompt(prompt: LanguageModelV2Prompt): string {
+export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buildOptions?: PromptBuildOptions): string {
+  return buildPrompt(options.prompt, buildOptions)
+}
+
+export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: PromptBuildOptions): string {
   const lines: string[] = []
+  const includeToolHistory = buildOptions?.includeToolHistory === true
   for (const message of prompt) {
-    lines.push(serializeMessage(message))
+    lines.push(serializeMessage(message, includeToolHistory))
   }
   return lines.filter(Boolean).join('\n\n') || 'Hello'
 }
 
-function serializeMessage(message: LanguageModelV2Message): string {
+function serializeMessage(message: LanguageModelV2Message, includeToolHistory: boolean): string {
   switch (message.role) {
     case 'system':
       return typeof message.content === 'string' ? wrap('system', message.content) : ''
     case 'user':
       return Array.isArray(message.content)
-        ? wrap('user', message.content.map(serializePart).filter(Boolean).join('\n'))
+        ? wrap('user', message.content.map((part) => serializePart(part, includeToolHistory)).filter(Boolean).join('\n'))
         : ''
     case 'assistant':
       return Array.isArray(message.content)
-        ? wrap('assistant', message.content.map(serializePart).filter(Boolean).join('\n'))
+        ? wrap('assistant', message.content.map((part) => serializePart(part, includeToolHistory)).filter(Boolean).join('\n'))
         : ''
     case 'tool':
-      return Array.isArray(message.content)
+      return includeToolHistory && Array.isArray(message.content)
         ? message.content.map(serializeToolResultPart).filter(Boolean).join('\n')
         : ''
     default:
@@ -37,11 +42,11 @@ function wrap(tag: string, value: string): string {
   return value.trim() ? `<${tag}>\n${value}\n</${tag}>` : ''
 }
 
-function serializePart(part: unknown): string {
+function serializePart(part: unknown, includeToolHistory: boolean): string {
   if (!part || typeof part !== 'object') return ''
   const record = part as Record<string, unknown>
   if (record.type === 'text' && typeof record.text === 'string') return record.text
-  if (record.type === 'tool-call') {
+  if (includeToolHistory && record.type === 'tool-call') {
     const input = typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {})
     return `<tool_call id="${String(record.toolCallId)}" name="${String(record.toolName)}">\n${input}\n</tool_call>`
   }

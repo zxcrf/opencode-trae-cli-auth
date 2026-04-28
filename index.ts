@@ -10,6 +10,7 @@ type TraePluginOptions = {
   cliPath?: string
   modelName?: string
   queryTimeout?: number
+  includeToolHistory?: boolean
   enforceTextOnly?: boolean
   maxRetries?: number
   retryDelayMs?: number
@@ -39,6 +40,7 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(options.cliPath ? { cliPath: options.cliPath } : {}),
           ...(options.modelName ? { modelName: options.modelName } : {}),
           ...(typeof options.queryTimeout === 'number' ? { queryTimeout: options.queryTimeout } : {}),
+          ...(typeof options.includeToolHistory === 'boolean' ? { includeToolHistory: options.includeToolHistory } : {}),
           ...(typeof options.enforceTextOnly === 'boolean' ? { enforceTextOnly: options.enforceTextOnly } : {}),
           ...(typeof options.maxRetries === 'number' ? { maxRetries: options.maxRetries } : {}),
           ...(typeof options.retryDelayMs === 'number' ? { retryDelayMs: options.retryDelayMs } : {}),
