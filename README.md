@@ -155,6 +155,7 @@ type TraePluginOptions = {
 
 - By default this provider is text-only and does not use Trae CLI as an agent runtime.
 - Experimental mode: `enableToolCalling=true` only supports forwarding function tool calls observed in Trae JSON output; behavior may vary across Trae CLI versions.
+- In experimental tool-calling mode, common tool input aliases are normalized (`file_path -> filePath`, `old_string/new_string -> oldString/newString`, etc.).
 - Usage/token counts may be zero when Trae CLI does not emit usage metadata.
 - Trae CLI may print `keyring is not supported on this system`; this is a Trae CLI environment warning and usually does not prevent responses.
 

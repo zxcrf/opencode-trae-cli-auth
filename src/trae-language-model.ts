@@ -209,13 +209,86 @@ function normalizeToolInput(toolName: string, input: string): string {
   const parsed = parseInputObject(input)
   if (!parsed) return input
   const normalizedToolName = toolName.toLowerCase()
-  if (normalizedToolName === 'read' || normalizedToolName === 'read_file') {
-    if (typeof parsed.filePath !== 'string') {
-      const pathValue = parsed.path ?? parsed.filepath ?? parsed.file_path
-      if (typeof pathValue === 'string' && pathValue.trim()) parsed.filePath = pathValue
-    }
+  const normalized = normalizeToolInputObject(normalizedToolName, parsed)
+  if ((normalizedToolName === 'read' || normalizedToolName === 'read_file') && typeof normalized.filePath !== 'string') {
+    const pathValue = normalized.path ?? normalized.filepath ?? normalized.file_path
+    if (typeof pathValue === 'string' && pathValue.trim()) normalized.filePath = pathValue
   }
-  return JSON.stringify(parsed)
+  return JSON.stringify(normalized)
+}
+
+function normalizeToolInputObject(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
+  switch (toolName) {
+    case 'read':
+    case 'read_file':
+    case 'write':
+      return renameKeys(input, { file_path: 'filePath' })
+    case 'edit':
+    case 'str_replace_based_edit_tool':
+      return renameKeys(input, {
+        file_path: 'filePath',
+        old_string: 'oldString',
+        new_string: 'newString',
+        replace_all: 'replaceAll',
+      })
+    case 'grep': {
+      const next = renameKeys(input, {})
+      if (!pickString(next.include)) {
+        next.include = pickString(next.glob) ?? inferIncludeFromType(next.type)
+      }
+      delete next.glob
+      delete next.type
+      delete next.output_mode
+      delete next.multiline
+      return next
+    }
+    case 'question': {
+      const next = renameKeys(input, {})
+      if (Array.isArray(next.questions)) {
+        next.questions = next.questions.map((question) => {
+          if (!question || typeof question !== 'object' || Array.isArray(question)) return question
+          const mapped = renameKeys(question as Record<string, unknown>, { multiSelect: 'multiple' })
+          delete mapped.answers
+          return mapped
+        })
+      }
+      delete next.answers
+      return next
+    }
+    case 'task': {
+      const next = renameKeys(input, {})
+      const subagentType = pickString(next.subagent_type)
+      if (subagentType) next.subagent_type = mapSubagentType(subagentType)
+      return next
+    }
+    default:
+      return input
+  }
+}
+
+function renameKeys(
+  input: Record<string, unknown>,
+  keyMap: Record<string, string>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).map(([key, value]) => [keyMap[key] ?? key, value]),
+  )
+}
+
+function pickString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function inferIncludeFromType(type: unknown): string | undefined {
+  const ext = pickString(type)
+  return ext ? `*.${ext}` : undefined
+}
+
+function mapSubagentType(value: string): string {
+  const lower = value.toLowerCase()
+  if (lower === 'explore') return 'explorer'
+  if (lower === 'execute') return 'worker'
+  return lower
 }
 
 function parseInputObject(input: string): Record<string, unknown> | undefined {
@@ -229,7 +302,20 @@ function parseInputObject(input: string): Record<string, unknown> | undefined {
 }
 
 function normalizeToolName(name: string): string {
-  const lowered = name.toLowerCase()
-  if (lowered === 'askuserquestion') return 'question'
-  return lowered
+  const lower = name.toLowerCase()
+  if (lower === 'askuserquestion') return 'question'
+  if (lower === 'agent') return 'task'
+  if (lower === 'exitplanmode') return 'plan_exit'
+  if (lower === 'str_replace_based_edit_tool') return 'edit'
+  if (lower.startsWith('mcp__')) {
+    const withoutPrefix = lower.slice(5)
+    const separatorIdx = withoutPrefix.indexOf('__')
+    if (separatorIdx > 0) {
+      const serverName = withoutPrefix.slice(0, separatorIdx)
+      const toolName = withoutPrefix.slice(separatorIdx + 2)
+      return `${serverName}_${toolName}`
+    }
+    return withoutPrefix
+  }
+  return lower
 }

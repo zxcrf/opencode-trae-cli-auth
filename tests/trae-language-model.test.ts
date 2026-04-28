@@ -288,4 +288,58 @@ describe('TraeLanguageModel', () => {
     const [, args] = spawnMock.mock.calls[0]
     expect(args).not.toContain('--disallowed-tool')
   })
+
+  it('normalizes edit tool name and snake_case args for tool-call payloads', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'patch file' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-edit-1',
+                    type: 'function',
+                    function: {
+                      name: 'str_replace_based_edit_tool',
+                      arguments: '{"file_path":"README.md","old_string":"old","new_string":"new","replace_all":true}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'editing' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-edit-1',
+      toolName: 'edit',
+      input: '{"filePath":"README.md","oldString":"old","newString":"new","replaceAll":true}',
+    })
+  })
 })
