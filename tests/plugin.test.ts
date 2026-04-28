@@ -81,4 +81,21 @@ describe('TraeProviderPlugin', () => {
     const method = auth.methods?.[0]
     expect(await method?.authorize?.()).toMatchObject({ type: 'success', key: 'trae-cli-auth' })
   })
+
+  it('applies tools profile defaults with explicit override support', async () => {
+    const hooks = await pluginModule.TraeProviderPlugin({
+      profile: 'tools',
+      maxPromptChars: 20000,
+    })
+    const config = {} as Config
+    await hooks.config!(config)
+
+    expect(config.provider?.trae?.options).toMatchObject({
+      enableToolCalling: true,
+      includeToolHistory: true,
+      enforceTextOnly: false,
+      maxPromptMessages: 50,
+      maxPromptChars: 20000,
+    })
+  })
 })

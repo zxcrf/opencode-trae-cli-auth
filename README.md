@@ -119,6 +119,7 @@ When loading the plugin programmatically, the plugin accepts:
 
 ```ts
 type TraePluginOptions = {
+  profile?: "text" | "tools"
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
@@ -135,6 +136,7 @@ type TraePluginOptions = {
 }
 ```
 
+- `profile`: quick preset. `text` = stable text-only defaults, `tools` = experimental tool-calling defaults.
 - `cliPath`: override the `traecli` binary path.
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
 - `modelAliases`: optional alias map, e.g. `{ coding: "GLM-5.1" }`, so users can call `trae/coding`.
@@ -181,6 +183,7 @@ Text-only stable preset:
   "provider": {
     "trae": {
       "options": {
+        "profile": "text",
         "enableToolCalling": false,
         "enforceTextOnly": true,
         "maxPromptMessages": 40,
@@ -199,6 +202,7 @@ Experimental tool-calling preset:
   "provider": {
     "trae": {
       "options": {
+        "profile": "tools",
         "enableToolCalling": true,
         "includeToolHistory": true,
         "enforceTextOnly": false,

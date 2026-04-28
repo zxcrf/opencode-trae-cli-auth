@@ -5,6 +5,7 @@ import { discoverTraeModels } from './src/trae-config-models.js'
 import { resolveTraeCliPath } from './src/trae-language-model.js'
 
 type TraePluginOptions = {
+  profile?: 'text' | 'tools'
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
@@ -31,9 +32,10 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
       config.provider = config.provider ?? {}
       const existing = config.provider.trae ?? {}
       const discoveredModels = discoverTraeModels()
+      const effectiveOptions = withProfileDefaults(options)
       const mergedModels = applyCapabilityOverrides(
         { ...TRAE_MODELS, ...discoveredModels, ...(existing.models ?? {}) },
-        options,
+        effectiveOptions,
       )
 
       config.provider.trae = {
@@ -42,19 +44,19 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
         name: existing.name ?? 'Trae',
         options: {
           ...(existing.options ?? {}),
-          ...(options.cliPath ? { cliPath: options.cliPath } : {}),
-          ...(options.modelName ? { modelName: options.modelName } : {}),
-          ...(typeof options.modelAliases === 'object' && options.modelAliases ? { modelAliases: options.modelAliases } : {}),
-          ...(typeof options.enableToolCalling === 'boolean' ? { enableToolCalling: options.enableToolCalling } : {}),
-          ...(typeof options.queryTimeout === 'number' ? { queryTimeout: options.queryTimeout } : {}),
-          ...(typeof options.includeToolHistory === 'boolean' ? { includeToolHistory: options.includeToolHistory } : {}),
-          ...(typeof options.maxPromptMessages === 'number' ? { maxPromptMessages: options.maxPromptMessages } : {}),
-          ...(typeof options.maxPromptChars === 'number' ? { maxPromptChars: options.maxPromptChars } : {}),
-          ...(typeof options.enforceTextOnly === 'boolean' ? { enforceTextOnly: options.enforceTextOnly } : {}),
-          ...(typeof options.maxRetries === 'number' ? { maxRetries: options.maxRetries } : {}),
-          ...(typeof options.retryDelayMs === 'number' ? { retryDelayMs: options.retryDelayMs } : {}),
-          ...(Array.isArray(options.extraArgs) ? { extraArgs: options.extraArgs } : {}),
-          ...(typeof options.sessionId === 'string' ? { sessionId: options.sessionId } : {}),
+          ...(effectiveOptions.cliPath ? { cliPath: effectiveOptions.cliPath } : {}),
+          ...(effectiveOptions.modelName ? { modelName: effectiveOptions.modelName } : {}),
+          ...(typeof effectiveOptions.modelAliases === 'object' && effectiveOptions.modelAliases ? { modelAliases: effectiveOptions.modelAliases } : {}),
+          ...(typeof effectiveOptions.enableToolCalling === 'boolean' ? { enableToolCalling: effectiveOptions.enableToolCalling } : {}),
+          ...(typeof effectiveOptions.queryTimeout === 'number' ? { queryTimeout: effectiveOptions.queryTimeout } : {}),
+          ...(typeof effectiveOptions.includeToolHistory === 'boolean' ? { includeToolHistory: effectiveOptions.includeToolHistory } : {}),
+          ...(typeof effectiveOptions.maxPromptMessages === 'number' ? { maxPromptMessages: effectiveOptions.maxPromptMessages } : {}),
+          ...(typeof effectiveOptions.maxPromptChars === 'number' ? { maxPromptChars: effectiveOptions.maxPromptChars } : {}),
+          ...(typeof effectiveOptions.enforceTextOnly === 'boolean' ? { enforceTextOnly: effectiveOptions.enforceTextOnly } : {}),
+          ...(typeof effectiveOptions.maxRetries === 'number' ? { maxRetries: effectiveOptions.maxRetries } : {}),
+          ...(typeof effectiveOptions.retryDelayMs === 'number' ? { retryDelayMs: effectiveOptions.retryDelayMs } : {}),
+          ...(Array.isArray(effectiveOptions.extraArgs) ? { extraArgs: effectiveOptions.extraArgs } : {}),
+          ...(typeof effectiveOptions.sessionId === 'string' ? { sessionId: effectiveOptions.sessionId } : {}),
         },
         models: mergedModels,
       }
@@ -94,4 +96,28 @@ function applyCapabilityOverrides(
   return Object.fromEntries(
     Object.entries(models).map(([id, model]) => [id, { ...model, tool_call: true }]),
   )
+}
+
+function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
+  if (options.profile === 'tools') {
+    return {
+      ...options,
+      enableToolCalling: options.enableToolCalling ?? true,
+      includeToolHistory: options.includeToolHistory ?? true,
+      enforceTextOnly: options.enforceTextOnly ?? false,
+      maxPromptMessages: options.maxPromptMessages ?? 50,
+      maxPromptChars: options.maxPromptChars ?? 16000,
+    }
+  }
+  if (options.profile === 'text') {
+    return {
+      ...options,
+      enableToolCalling: options.enableToolCalling ?? false,
+      includeToolHistory: options.includeToolHistory ?? false,
+      enforceTextOnly: options.enforceTextOnly ?? true,
+      maxPromptMessages: options.maxPromptMessages ?? 40,
+      maxPromptChars: options.maxPromptChars ?? 12000,
+    }
+  }
+  return options
 }
