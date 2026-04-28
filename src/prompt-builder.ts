@@ -4,6 +4,7 @@ type PromptBuildOptions = {
   includeToolHistory?: boolean
   maxChars?: number
   maxMessages?: number
+  maxToolPayloadChars?: number
 }
 
 export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buildOptions?: PromptBuildOptions): string {
@@ -15,27 +16,31 @@ export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: Prompt
   const lines: string[] = []
   const includeToolHistory = buildOptions?.includeToolHistory === true
   for (const message of selectedPrompt) {
-    lines.push(serializeMessage(message, includeToolHistory))
+    lines.push(serializeMessage(message, includeToolHistory, buildOptions?.maxToolPayloadChars))
   }
   const text = lines.filter(Boolean).join('\n\n') || 'Hello'
   return trimPrompt(text, buildOptions?.maxChars)
 }
 
-function serializeMessage(message: LanguageModelV2Message, includeToolHistory: boolean): string {
+function serializeMessage(
+  message: LanguageModelV2Message,
+  includeToolHistory: boolean,
+  maxToolPayloadChars?: number,
+): string {
   switch (message.role) {
     case 'system':
       return typeof message.content === 'string' ? wrap('system', message.content) : ''
     case 'user':
       return Array.isArray(message.content)
-        ? wrap('user', message.content.map((part) => serializePart(part, includeToolHistory)).filter(Boolean).join('\n'))
+        ? wrap('user', message.content.map((part) => serializePart(part, includeToolHistory, maxToolPayloadChars)).filter(Boolean).join('\n'))
         : ''
     case 'assistant':
       return Array.isArray(message.content)
-        ? wrap('assistant', message.content.map((part) => serializePart(part, includeToolHistory)).filter(Boolean).join('\n'))
+        ? wrap('assistant', message.content.map((part) => serializePart(part, includeToolHistory, maxToolPayloadChars)).filter(Boolean).join('\n'))
         : ''
     case 'tool':
       return includeToolHistory && Array.isArray(message.content)
-        ? message.content.map(serializeToolResultPart).filter(Boolean).join('\n')
+        ? message.content.map((part) => serializeToolResultPart(part, maxToolPayloadChars)).filter(Boolean).join('\n')
         : ''
     default:
       return ''
@@ -46,12 +51,13 @@ function wrap(tag: string, value: string): string {
   return value.trim() ? `<${tag}>\n${value}\n</${tag}>` : ''
 }
 
-function serializePart(part: unknown, includeToolHistory: boolean): string {
+function serializePart(part: unknown, includeToolHistory: boolean, maxToolPayloadChars?: number): string {
   if (!part || typeof part !== 'object') return ''
   const record = part as Record<string, unknown>
   if (record.type === 'text' && typeof record.text === 'string') return record.text
   if (includeToolHistory && record.type === 'tool-call') {
-    const input = typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {})
+    const inputRaw = typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {})
+    const input = trimToolPayload(inputRaw, maxToolPayloadChars, 'tool_call input')
     return `<tool_call id="${String(record.toolCallId)}" name="${String(record.toolName)}">\n${input}\n</tool_call>`
   }
   if (record.type === 'file') {
@@ -63,11 +69,12 @@ function serializePart(part: unknown, includeToolHistory: boolean): string {
   return ''
 }
 
-function serializeToolResultPart(part: unknown): string {
+function serializeToolResultPart(part: unknown, maxToolPayloadChars?: number): string {
   if (!part || typeof part !== 'object') return ''
   const record = part as Record<string, unknown>
   if (record.type !== 'tool-result') return ''
-  return `<tool_result id="${String(record.toolCallId)}" name="${String(record.toolName)}">\n${serializeToolResultOutput(record.output)}\n</tool_result>`
+  const output = trimToolPayload(serializeToolResultOutput(record.output), maxToolPayloadChars, 'tool_result output')
+  return `<tool_result id="${String(record.toolCallId)}" name="${String(record.toolName)}">\n${output}\n</tool_result>`
 }
 
 function serializeToolResultOutput(output: unknown): string {
@@ -87,6 +94,15 @@ function trimPrompt(prompt: string, maxChars?: number): string {
   const suffix = prompt.slice(prompt.length - limit)
   const truncated = prompt.length - suffix.length
   return `[Prompt truncated: ${truncated} chars omitted]\n${suffix}`
+}
+
+function trimToolPayload(text: string, maxChars: number | undefined, label: string): string {
+  if (typeof maxChars !== 'number' || !Number.isFinite(maxChars)) return text
+  const limit = Math.max(128, Math.floor(maxChars))
+  if (text.length <= limit) return text
+  const suffix = text.slice(text.length - limit)
+  const truncated = text.length - suffix.length
+  return `[${label} truncated: ${truncated} chars omitted]\n${suffix}`
 }
 
 function trimMessages(prompt: LanguageModelV2Prompt, maxMessages?: number): LanguageModelV2Prompt {

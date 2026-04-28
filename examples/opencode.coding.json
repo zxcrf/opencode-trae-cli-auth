@@ -9,6 +9,7 @@
         "enforceTextOnly": false,
         "maxPromptMessages": 60,
         "maxPromptChars": 20000,
+        "maxToolPayloadChars": 4000,
         "maxRetries": 1,
         "retryDelayMs": 800
       }

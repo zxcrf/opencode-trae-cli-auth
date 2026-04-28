@@ -10,7 +10,7 @@ It is useful when Trae CLI already works locally and you want to use the same ac
 - Uses the local `traecli` binary and existing Trae login; no API key is stored by this package.
 - Exposes common Trae cloud models, including `GLM-5.1`, `Doubao-Seed-2.0-Code`, `DeepSeek-V3.2`, `Qwen3-Coder-Next`, and more.
 - Reads the current model from `~/.trae/trae_cli.yaml` / `~/.trae/traecli.yaml` when available.
-- Provides text-only LLM generation; OpenCode tools are not delegated to Trae CLI.
+- Provides stable text-first generation and an optional experimental tool-call bridge for coding workflows.
 - Supports local `file://` plugin installs for development.
 
 ## Prerequisites
@@ -109,9 +109,9 @@ opencode run --model trae/GLM-5.1 "reply with 'ok'"
 
 ## Capability Boundary
 
-This package uses Trae CLI only as a text-in/text-out LLM backend. OpenCode tools, shell commands, file reads, MCP calls, and permission prompts are not delegated to Trae CLI.
+This package uses Trae CLI as the model backend. In default `coding` profile, tool-calling forwarding is enabled (`enableToolCalling=true`) so OpenCode can execute tools locally while Trae emits tool intents.
 
-Model metadata intentionally advertises `tool_call: false` and `attachment: false`. This provider does not support OpenCode tool/function calling and does not use Trae CLI as an agent runtime.
+Tool execution still belongs to OpenCode runtime (permissions, sandbox, command execution). Trae CLI is not used as a standalone tool runtime.
 
 ## Options
 
@@ -128,6 +128,7 @@ type TraePluginOptions = {
   includeToolHistory?: boolean
   maxPromptMessages?: number
   maxPromptChars?: number
+  maxToolPayloadChars?: number
   enforceTextOnly?: boolean
   maxRetries?: number
   retryDelayMs?: number
@@ -145,6 +146,7 @@ type TraePluginOptions = {
 - `includeToolHistory`: defaults to `false`; omit prior `tool-call/tool-result` history from prompt to reduce context bloat in text-only mode.
 - `maxPromptMessages`: defaults to `40`; keep all `system` messages and only the most recent non-system messages.
 - `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.
+- `maxToolPayloadChars`: truncates oversized tool call inputs and tool result payloads before they are injected back into prompt history (default: `coding=4000`, `tools=6000`, `text=2000`).
 - `enforceTextOnly`: defaults to `true`; adds `--disallowed-tool` flags for common tools (`Read/Bash/Edit/Replace/Write/Glob/Grep/Task`) to keep Trae CLI in text-only behavior.
 - `maxRetries`: transient error retry count, default `1`.
 - `retryDelayMs`: delay between retries in milliseconds, default `800`.
@@ -153,7 +155,7 @@ type TraePluginOptions = {
 
 ## Known limitations
 
-- By default this provider is text-only and does not use Trae CLI as an agent runtime.
+- Tool execution depends on OpenCode runtime permissions and sandbox policy.
 - Experimental mode: `enableToolCalling=true` only supports forwarding function tool calls observed in Trae JSON output; behavior may vary across Trae CLI versions.
 - In experimental tool-calling mode, common tool input aliases are normalized (`file_path -> filePath`, `old_string/new_string -> oldString/newString`, etc.).
 - Usage/token counts may be zero when Trae CLI does not emit usage metadata.
@@ -190,7 +192,8 @@ Coding default preset:
         "includeToolHistory": true,
         "enforceTextOnly": false,
         "maxPromptMessages": 60,
-        "maxPromptChars": 20000
+        "maxPromptChars": 20000,
+        "maxToolPayloadChars": 4000
       }
     }
   },
@@ -209,7 +212,8 @@ Text-only stable preset:
         "enableToolCalling": false,
         "enforceTextOnly": true,
         "maxPromptMessages": 40,
-        "maxPromptChars": 12000
+        "maxPromptChars": 12000,
+        "maxToolPayloadChars": 2000
       }
     }
   },
@@ -229,7 +233,8 @@ Experimental tool-calling preset:
         "includeToolHistory": true,
         "enforceTextOnly": false,
         "maxPromptMessages": 50,
-        "maxPromptChars": 16000
+        "maxPromptChars": 16000,
+        "maxToolPayloadChars": 6000
       }
     }
   },

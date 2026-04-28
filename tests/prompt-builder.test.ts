@@ -78,6 +78,36 @@ describe('prompt builder', () => {
     expect(prompt).toContain('contents')
   })
 
+  it('truncates oversized tool payloads when maxToolPayloadChars is set', () => {
+    const prompt = buildPrompt([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            input: { filePath: 'README.md', payload: 'x'.repeat(1200) },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            output: { type: 'text', value: 'y'.repeat(1200) },
+          },
+        ],
+      },
+    ] as any, { includeToolHistory: true, maxToolPayloadChars: 200 })
+
+    expect(prompt).toContain('[tool_call input truncated:')
+    expect(prompt).toContain('[tool_result output truncated:')
+  })
+
   it('represents unsupported media without throwing', () => {
     const prompt = buildPrompt([
       {

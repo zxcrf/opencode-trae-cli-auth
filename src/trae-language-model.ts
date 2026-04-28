@@ -26,6 +26,7 @@ export type TraeProviderOptions = {
   includeToolHistory?: boolean
   maxPromptMessages?: number
   maxPromptChars?: number
+  maxToolPayloadChars?: number
   extraArgs?: string[]
   enforceTextOnly?: boolean
   maxRetries?: number
@@ -132,6 +133,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
               includeToolHistory: this.providerOptions?.includeToolHistory ?? this.providerOptions?.enableToolCalling === true,
               maxMessages: this.providerOptions?.maxPromptMessages ?? 40,
               maxChars: this.providerOptions?.maxPromptChars ?? 12000,
+              maxToolPayloadChars: this.providerOptions?.maxToolPayloadChars,
             }),
             queryTimeout: this.providerOptions?.queryTimeout,
             extraArgs: this.providerOptions?.extraArgs,

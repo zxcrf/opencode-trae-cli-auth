@@ -14,6 +14,7 @@ type TraePluginOptions = {
   includeToolHistory?: boolean
   maxPromptMessages?: number
   maxPromptChars?: number
+  maxToolPayloadChars?: number
   enforceTextOnly?: boolean
   maxRetries?: number
   retryDelayMs?: number
@@ -52,6 +53,7 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(typeof effectiveOptions.includeToolHistory === 'boolean' ? { includeToolHistory: effectiveOptions.includeToolHistory } : {}),
           ...(typeof effectiveOptions.maxPromptMessages === 'number' ? { maxPromptMessages: effectiveOptions.maxPromptMessages } : {}),
           ...(typeof effectiveOptions.maxPromptChars === 'number' ? { maxPromptChars: effectiveOptions.maxPromptChars } : {}),
+          ...(typeof effectiveOptions.maxToolPayloadChars === 'number' ? { maxToolPayloadChars: effectiveOptions.maxToolPayloadChars } : {}),
           ...(typeof effectiveOptions.enforceTextOnly === 'boolean' ? { enforceTextOnly: effectiveOptions.enforceTextOnly } : {}),
           ...(typeof effectiveOptions.maxRetries === 'number' ? { maxRetries: effectiveOptions.maxRetries } : {}),
           ...(typeof effectiveOptions.retryDelayMs === 'number' ? { retryDelayMs: effectiveOptions.retryDelayMs } : {}),
@@ -108,6 +110,7 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
       enforceTextOnly: options.enforceTextOnly ?? false,
       maxPromptMessages: options.maxPromptMessages ?? 60,
       maxPromptChars: options.maxPromptChars ?? 20000,
+      maxToolPayloadChars: options.maxToolPayloadChars ?? 4000,
     }
   }
   if (options.profile === 'tools') {
@@ -118,6 +121,7 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
       enforceTextOnly: options.enforceTextOnly ?? false,
       maxPromptMessages: options.maxPromptMessages ?? 50,
       maxPromptChars: options.maxPromptChars ?? 16000,
+      maxToolPayloadChars: options.maxToolPayloadChars ?? 6000,
     }
   }
   if (options.profile === 'text') {
@@ -128,6 +132,7 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
       enforceTextOnly: options.enforceTextOnly ?? true,
       maxPromptMessages: options.maxPromptMessages ?? 40,
       maxPromptChars: options.maxPromptChars ?? 12000,
+      maxToolPayloadChars: options.maxToolPayloadChars ?? 2000,
     }
   }
   return options
