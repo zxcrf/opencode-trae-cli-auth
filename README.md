@@ -137,6 +137,25 @@ npm run build
 npm pack --dry-run
 ```
 
+
+## Trae CLI env helper
+
+This repository includes `scripts/trae-cli-env.sh`, a sourceable shell helper for machines where Trae CLI is already installed.
+
+Usage:
+
+```bash
+PAT=<your-token> source scripts/trae-cli-env.sh
+trae-cli --print "say hello"
+```
+
+The helper creates the minimal Trae config files only when missing:
+
+- `~/.trae/traecli.yaml`
+- `~/.trae/trae_cli.yaml`
+
+It exports `TRAECLI_PERSONAL_ACCESS_TOKEN` and `SEC_TOKEN_PATH`, and adds the detected `trae-cli` binary directory to `PATH`.
+
 ## License
 
 MIT
