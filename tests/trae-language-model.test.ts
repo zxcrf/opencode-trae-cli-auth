@@ -98,6 +98,35 @@ describe('TraeLanguageModel', () => {
     expect(parts.find((p) => p.type === 'finish').usage).toMatchObject({ inputTokens: 10, outputTokens: 2, totalTokens: 12 })
   })
 
+  it('maps profile alias model ids to real Trae model names', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('fast', { cliPath: '/usr/bin/traecli' })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      closeChild(child)
+    })
+    for await (const _ of (await streamPromise).stream as any) {}
+
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args).toContain('--config')
+    expect(args).toContain('model.name=MiniMax-M2.7')
+  })
+
   it('omits tool history from prompt by default', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()

@@ -9,6 +9,7 @@ import { resolveTraeCliPath } from './src/trae-language-model.js'
 type TraePluginOptions = {
   cliPath?: string
   modelName?: string
+  modelAliases?: Record<string, string>
   queryTimeout?: number
   includeToolHistory?: boolean
   maxPromptChars?: number
@@ -40,6 +41,7 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(existing.options ?? {}),
           ...(options.cliPath ? { cliPath: options.cliPath } : {}),
           ...(options.modelName ? { modelName: options.modelName } : {}),
+          ...(typeof options.modelAliases === 'object' && options.modelAliases ? { modelAliases: options.modelAliases } : {}),
           ...(typeof options.queryTimeout === 'number' ? { queryTimeout: options.queryTimeout } : {}),
           ...(typeof options.includeToolHistory === 'boolean' ? { includeToolHistory: options.includeToolHistory } : {}),
           ...(typeof options.maxPromptChars === 'number' ? { maxPromptChars: options.maxPromptChars } : {}),

@@ -24,6 +24,12 @@ export const TRAE_CLOUD_MODEL_IDS = [
   'Kimi-K2.6',
 ] as const
 
+export const TRAE_MODEL_PROFILES = {
+  fast: 'MiniMax-M2.7',
+  balanced: 'GLM-5.1',
+  strong: 'Kimi-K2.6',
+} as const
+
 const TEXT_ONLY_CAPABILITIES = {
   attachment: false,
   reasoning: false,
@@ -42,6 +48,9 @@ export const TRAE_MODELS: Record<string, TraeModelDefinition> = {
   ...Object.fromEntries(
     TRAE_CLOUD_MODEL_IDS.map((id) => [id, createTraeModelDefinition(id)]),
   ),
+  fast: createTraeModelDefinition('fast', `Trae Fast (${TRAE_MODEL_PROFILES.fast})`),
+  balanced: createTraeModelDefinition('balanced', `Trae Balanced (${TRAE_MODEL_PROFILES.balanced})`),
+  strong: createTraeModelDefinition('strong', `Trae Strong (${TRAE_MODEL_PROFILES.strong})`),
 }
 
 export const DEFAULT_MODEL_ID = 'default'

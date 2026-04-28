@@ -40,6 +40,7 @@ describe('TraeProviderPlugin', () => {
     const hooks = await pluginModule.TraeProviderPlugin({
       cliPath: '/custom/traecli',
       queryTimeout: 33,
+      modelAliases: { coding: 'GLM-5.1' },
       includeToolHistory: false,
       maxPromptChars: 16000,
       enforceTextOnly: true,
@@ -60,6 +61,7 @@ describe('TraeProviderPlugin', () => {
     expect(config.provider?.trae?.options).toMatchObject({
       cliPath: '/custom/traecli',
       queryTimeout: 33,
+      modelAliases: { coding: 'GLM-5.1' },
       includeToolHistory: false,
       maxPromptChars: 16000,
       enforceTextOnly: true,

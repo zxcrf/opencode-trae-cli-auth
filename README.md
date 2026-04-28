@@ -82,6 +82,9 @@ Built-in model ids currently include:
 - `trae/GLM-5`
 - `trae/GLM-4.7`
 - `trae/MiniMax-M2.7`
+- `trae/fast` (alias to `MiniMax-M2.7`)
+- `trae/balanced` (alias to `GLM-5.1`)
+- `trae/strong` (alias to `Kimi-K2.6`)
 - `trae/MiniMax-M2.5`
 - `trae/Qwen3-Coder-Next`
 - `trae/Kimi-K2.6`
@@ -117,6 +120,7 @@ When loading the plugin programmatically, the plugin accepts:
 type TraePluginOptions = {
   cliPath?: string
   modelName?: string
+  modelAliases?: Record<string, string>
   queryTimeout?: number
   includeToolHistory?: boolean
   maxPromptChars?: number
@@ -130,6 +134,7 @@ type TraePluginOptions = {
 
 - `cliPath`: override the `traecli` binary path.
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
+- `modelAliases`: optional alias map, e.g. `{ coding: "GLM-5.1" }`, so users can call `trae/coding`.
 - `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
 - `includeToolHistory`: defaults to `false`; omit prior `tool-call/tool-result` history from prompt to reduce context bloat in text-only mode.
 - `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.

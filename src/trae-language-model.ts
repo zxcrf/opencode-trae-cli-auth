@@ -15,10 +15,12 @@ import type { TraeCliResult } from './cli/json-output.js'
 import { contentToText } from './cli/text-content.js'
 import { mapUsage } from './cli/usage.js'
 import { runCliLlm } from './cli/cli-runner.js'
+import { TRAE_MODEL_PROFILES } from './models.js'
 
 export type TraeProviderOptions = {
   cliPath?: string
   modelName?: string
+  modelAliases?: Record<string, string>
   queryTimeout?: number
   includeToolHistory?: boolean
   maxPromptChars?: number
@@ -119,9 +121,10 @@ export class TraeLanguageModel implements LanguageModelV2 {
       start: async (controller) => {
         controller.enqueue({ type: 'stream-start', warnings: [] })
         try {
+          const selectedModel = resolveTraeModelName(this.modelId, this.providerOptions)
           const result = await runCliLlm({
             cliPath,
-            modelName: this.providerOptions?.modelName ?? (this.modelId === 'default' ? undefined : this.modelId),
+            modelName: selectedModel,
             prompt: buildPromptFromOptions(options, {
               includeToolHistory: this.providerOptions?.includeToolHistory,
               maxChars: this.providerOptions?.maxPromptChars ?? 12000,
@@ -149,6 +152,16 @@ export class TraeLanguageModel implements LanguageModelV2 {
 
     return { stream }
   }
+}
+
+function resolveTraeModelName(modelId: string, options?: TraeProviderOptions): string | undefined {
+  if (options?.modelName) return options.modelName
+  if (modelId === 'default') return undefined
+  const aliases = {
+    ...TRAE_MODEL_PROFILES,
+    ...(options?.modelAliases ?? {}),
+  }
+  return aliases[modelId] ?? modelId
 }
 
 function emitResult(controller: ReadableStreamDefaultController<LanguageModelV2StreamPart>, result: TraeCliResult): void {
