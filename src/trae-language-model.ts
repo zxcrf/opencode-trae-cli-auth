@@ -345,10 +345,19 @@ function normalizeToolInputObject(toolName: string, input: Record<string, unknow
     case 'glob': {
       const next = renameKeys(input, {})
       if (!pickString(next.pattern)) {
-        next.pattern = pickString(next.glob) ?? pickString(next.include) ?? '**/*'
+        const pathArg = pickString(next.path) ?? pickString(next.dir) ?? pickString(next.directory)
+        if (pathArg && pathArg !== '.') {
+          const base = pathArg.endsWith('/') ? pathArg.slice(0, -1) : pathArg
+          next.pattern = `${base}/**/*`
+        } else {
+          next.pattern = pickString(next.glob) ?? pickString(next.include) ?? '**/*'
+        }
       }
       delete next.glob
       delete next.include
+      delete next.path
+      delete next.dir
+      delete next.directory
       return next
     }
     case 'bash': {
@@ -530,6 +539,7 @@ function normalizeToolName(name: string): string {
   if (lower === 'str_replace_based_edit_tool') return 'edit'
   if (lower === 'readfile') return 'read'
   if (lower === 'writefile') return 'write'
+  if (lower === 'ls' || lower === 'listfiles' || lower === 'list_files' || lower === 'listdir' || lower === 'list_dir') return 'glob'
   if (lower === 'runbash' || lower === 'bashcommand') return 'bash'
   if (lower.startsWith('mcp__')) {
     const withoutPrefix = lower.slice(5)

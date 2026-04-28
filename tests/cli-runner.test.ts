@@ -113,6 +113,19 @@ describe('runCliLlm', () => {
     expect(child.kill).toHaveBeenCalled()
   })
 
+  it('fails fast when already aborted before spawn', async () => {
+    const { runCliLlm } = await import('../src/cli/cli-runner.js')
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(runCliLlm({
+      cliPath: '/usr/bin/traecli',
+      prompt: 'hello',
+      abortSignal: controller.signal,
+    })).rejects.toThrow(/aborted/)
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
   it('kills the process when the provider timeout elapses', async () => {
     vi.useFakeTimers()
     const { child, stdout, stderr } = makeChild()

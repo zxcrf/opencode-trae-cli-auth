@@ -481,6 +481,73 @@ describe('TraeLanguageModel', () => {
     })
   })
 
+  it('maps ls tool calls to glob with a safe pattern', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list files' }] }],
+      tools: [
+        {
+          type: 'function',
+          name: 'glob',
+          description: 'List files',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern: { type: 'string' },
+            },
+          },
+        },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-ls-1',
+                    type: 'function',
+                    function: {
+                      name: 'ls',
+                      arguments: '{"path":"src"}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'listing' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-ls-1',
+      toolName: 'glob',
+      input: '{"pattern":"src/**/*"}',
+    })
+  })
+
   it('normalizes grep input by converting include and dropping unsupported flags', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()

@@ -39,6 +39,9 @@ export async function runCliLlm(args: CliLlmRunOptions): Promise<TraeCliResult> 
 }
 
 async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
+  if (args.abortSignal?.aborted) {
+    throw new Error('traecli request aborted')
+  }
   const disallowToolsArgs =
     args.enforceTextOnly === false ? [] : DEFAULT_DISALLOWED_TOOLS.flatMap((name) => ['--disallowed-tool', name])
 
@@ -63,7 +66,10 @@ async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
   let timedOut = false
   const abort = () => {
     aborted = true
-    child.kill()
+    child.kill('SIGTERM')
+    setTimeout(() => {
+      if (!child.killed) child.kill('SIGKILL')
+    }, 300).unref?.()
   }
   args.abortSignal?.addEventListener('abort', abort, { once: true })
   const timeoutSeconds = normalizeTimeoutSeconds(args.queryTimeout ?? 120)
