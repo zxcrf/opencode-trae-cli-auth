@@ -411,4 +411,72 @@ describe('TraeLanguageModel', () => {
       input: '{"filePath":"README.md","offset":1,"limit":1}',
     })
   })
+
+  it('normalizes grep input by converting include and dropping unsupported flags', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'find keyword' }] }],
+      tools: [
+        {
+          type: 'function',
+          name: 'grep',
+          description: 'Search text',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern: { type: 'string' },
+              include: { type: 'string' },
+            },
+          },
+        },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-grep-1',
+                    type: 'function',
+                    function: {
+                      name: 'grep',
+                      arguments: '{"pattern":"TODO","glob":"*.ts","-n":true,"head_limit":20}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'searching' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-grep-1',
+      toolName: 'grep',
+      input: '{"pattern":"TODO","include":"*.ts"}',
+    })
+  })
 })

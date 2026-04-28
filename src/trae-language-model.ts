@@ -280,6 +280,12 @@ function normalizeToolInputObject(toolName: string, input: Record<string, unknow
       delete next.type
       delete next.output_mode
       delete next.multiline
+      delete next['-i']
+      delete next['-n']
+      delete next['-B']
+      delete next['-A']
+      delete next['-C']
+      delete next.head_limit
       return next
     }
     case 'glob': {
