@@ -118,6 +118,7 @@ type TraePluginOptions = {
   cliPath?: string
   modelName?: string
   queryTimeout?: number
+  enforceTextOnly?: boolean
   extraArgs?: string[]
   sessionId?: string
 }
@@ -126,6 +127,7 @@ type TraePluginOptions = {
 - `cliPath`: override the `traecli` binary path.
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
 - `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
+- `enforceTextOnly`: defaults to `true`; adds `--disallowed-tool` flags for common tools (`Read/Bash/Edit/Replace/Write/Glob/Grep/Task`) to keep Trae CLI in text-only behavior.
 - `extraArgs`: extra arguments appended to `traecli`.
 - `sessionId`: retained for configuration compatibility, but not used by the text-only execution path.
 

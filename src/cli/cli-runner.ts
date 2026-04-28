@@ -7,13 +7,19 @@ export type CliLlmRunOptions = {
   prompt: string
   queryTimeout?: number
   extraArgs?: string[]
+  enforceTextOnly?: boolean
   abortSignal?: AbortSignal
 }
+
+const DEFAULT_DISALLOWED_TOOLS = ['Read', 'Bash', 'Edit', 'Replace', 'Write', 'Glob', 'Grep', 'Task'] as const
 
 export async function runCliLlm(args: CliLlmRunOptions): Promise<TraeCliResult> {
   if (!args.cliPath) {
     throw new Error('traecli binary not found. Install traecli and ensure it is on PATH.')
   }
+
+  const disallowToolsArgs =
+    args.enforceTextOnly === false ? [] : DEFAULT_DISALLOWED_TOOLS.flatMap((name) => ['--disallowed-tool', name])
 
   const cliArgs = [
     args.prompt,
@@ -21,6 +27,7 @@ export async function runCliLlm(args: CliLlmRunOptions): Promise<TraeCliResult> 
     '--json',
     '--query-timeout',
     formatDuration(args.queryTimeout ?? 120),
+    ...disallowToolsArgs,
     ...(args.modelName ? ['--config', `model.name=${args.modelName}`] : []),
     ...(args.extraArgs ?? []),
   ]

@@ -21,6 +21,7 @@ export type TraeProviderOptions = {
   modelName?: string
   queryTimeout?: number
   extraArgs?: string[]
+  enforceTextOnly?: boolean
   sessionId?: string
 }
 
@@ -120,6 +121,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
             prompt: buildPromptFromOptions(options),
             queryTimeout: this.providerOptions?.queryTimeout,
             extraArgs: this.providerOptions?.extraArgs,
+            enforceTextOnly: this.providerOptions?.enforceTextOnly,
             abortSignal: options.abortSignal,
           })
           emitResult(controller, result)

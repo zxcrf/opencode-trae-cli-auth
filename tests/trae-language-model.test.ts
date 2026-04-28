@@ -46,7 +46,32 @@ describe('TraeLanguageModel', () => {
     const finish = parts.find((p) => p.type === 'finish')
     expect(finish.usage).toMatchObject({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
     const [, args] = spawnMock.mock.calls[0]
-    expect(args).toEqual(['<user>\nping\n</user>', '-p', '--json', '--query-timeout', '55s', '--config', 'model.name=custom-model', '--foo'])
+    expect(args).toEqual([
+      '<user>\nping\n</user>',
+      '-p',
+      '--json',
+      '--query-timeout',
+      '55s',
+      '--disallowed-tool',
+      'Read',
+      '--disallowed-tool',
+      'Bash',
+      '--disallowed-tool',
+      'Edit',
+      '--disallowed-tool',
+      'Replace',
+      '--disallowed-tool',
+      'Write',
+      '--disallowed-tool',
+      'Glob',
+      '--disallowed-tool',
+      'Grep',
+      '--disallowed-tool',
+      'Task',
+      '--config',
+      'model.name=custom-model',
+      '--foo',
+    ])
   })
 
   it('maps Trae nested response_meta usage', async () => {
