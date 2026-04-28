@@ -57,9 +57,29 @@ function runOnce({ cwd, timeoutMs, cmd, argv }) {
     let stdout = ''
     let stderr = ''
     let timedOut = false
+    let resolved = false
+    const finish = (exitCode) => {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timer)
+      resolve({
+        exitCode,
+        stdout,
+        stderr,
+      })
+    }
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill()
+      child.kill('SIGTERM')
+      setTimeout(() => {
+        if (!resolved) child.kill('SIGKILL')
+      }, 3000).unref?.()
+      setTimeout(() => {
+        if (!resolved) {
+          stderr += '\n[smoke] forced timeout resolution'
+          finish(-1)
+        }
+      }, 6000).unref?.()
     }, timeoutMs)
     timer.unref?.()
 
@@ -67,13 +87,12 @@ function runOnce({ cwd, timeoutMs, cmd, argv }) {
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', (chunk) => { stdout += chunk })
     child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.once('error', (err) => {
+      stderr += `\n[smoke] spawn error: ${String(err)}`
+      finish(-1)
+    })
     child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({
-        exitCode: timedOut ? -1 : (code ?? -1),
-        stdout,
-        stderr,
-      })
+      finish(timedOut ? -1 : (code ?? -1))
     })
   })
 }
