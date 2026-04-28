@@ -46,7 +46,7 @@ describe('TraeLanguageModel', () => {
     const finish = parts.find((p) => p.type === 'finish')
     expect(finish.usage).toMatchObject({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
     const [, args] = spawnMock.mock.calls[0]
-    expect(args).toEqual(['ping', '-p', '--json', '--query-timeout', '55s', '--config', 'model.name=custom-model', '--session-id', 'test-session', '--foo'])
+    expect(args).toEqual(['<user>\nping\n</user>', '-p', '--json', '--query-timeout', '55s', '--config', 'model.name=custom-model', '--foo'])
   })
 
   it('maps Trae nested response_meta usage', async () => {
@@ -95,5 +95,55 @@ describe('TraeLanguageModel', () => {
 
     expect(result.content[0]).toMatchObject({ type: 'text', text: 'done' })
     expect(result.finishReason).toBe('stop')
+  })
+
+  it('emits a complete OpenCode stream sequence for text output', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli' })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"pong"},"usage":{"input_tokens":1,"output_tokens":1}}')
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.map((p) => p.type)).toEqual([
+      'stream-start',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish',
+    ])
+    expect(parts.at(-1).finishReason).toBe('stop')
+  })
+
+  it('emits error and finish without throwing from the stream producer', async () => {
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: undefined })
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.map((p) => p.type)).toEqual(['stream-start', 'error', 'finish'])
+    expect(parts.at(-1).finishReason).toBe('error')
   })
 })

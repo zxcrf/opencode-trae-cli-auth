@@ -10,6 +10,7 @@ It is useful when Trae CLI already works locally and you want to use the same ac
 - Uses the local `traecli` binary and existing Trae login; no API key is stored by this package.
 - Exposes common Trae cloud models, including `GLM-5.1`, `Doubao-Seed-2.0-Code`, `DeepSeek-V3.2`, `Qwen3-Coder-Next`, and more.
 - Reads the current model from `~/.trae/trae_cli.yaml` / `~/.trae/traecli.yaml` when available.
+- Provides text-only LLM generation; OpenCode tools are not delegated to Trae CLI.
 - Supports local `file://` plugin installs for development.
 
 ## Prerequisites
@@ -102,6 +103,12 @@ Other model ids are passed to Trae CLI as:
 opencode run --model trae/GLM-5.1 "reply with 'ok'"
 ```
 
+## Capability Boundary
+
+This package uses Trae CLI only as a text-in/text-out LLM backend. OpenCode tools, shell commands, file reads, MCP calls, and permission prompts are not delegated to Trae CLI.
+
+Model metadata intentionally advertises `tool_call: false` and `attachment: false`. This provider does not support OpenCode tool/function calling and does not use Trae CLI as an agent runtime.
+
 ## Options
 
 When loading the plugin programmatically, the plugin accepts:
@@ -120,11 +127,11 @@ type TraePluginOptions = {
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
 - `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
 - `extraArgs`: extra arguments appended to `traecli`.
-- `sessionId`: optional session id; not passed by default because some Trae CLI versions crash with explicit session ids.
+- `sessionId`: retained for configuration compatibility, but not used by the text-only execution path.
 
 ## Known limitations
 
-- Tool calls are not supported yet; models are advertised with `tool_call: false`.
+- This provider is text-only by design. It does not support OpenCode tool/function calling and does not use Trae CLI as an agent runtime.
 - Usage/token counts may be zero when Trae CLI does not emit usage metadata.
 - Trae CLI may print `keyring is not supported on this system`; this is a Trae CLI environment warning and usually does not prevent responses.
 
@@ -135,6 +142,13 @@ npm install
 npm test
 npm run build
 npm pack --dry-run
+```
+
+Smoke check a local Trae CLI and OpenCode install:
+
+```bash
+traecli "reply with ok" -p --json
+opencode run --model trae/default "reply with ok"
 ```
 
 

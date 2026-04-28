@@ -24,14 +24,18 @@ export const TRAE_CLOUD_MODEL_IDS = [
   'Kimi-K2.6',
 ] as const
 
+const TEXT_ONLY_CAPABILITIES = {
+  attachment: false,
+  reasoning: false,
+  temperature: false,
+  tool_call: false,
+} as const
+
 export const TRAE_MODELS: Record<string, TraeModelDefinition> = {
   default: {
     id: 'default',
     name: 'Trae Default',
-    attachment: false,
-    reasoning: false,
-    temperature: false,
-    tool_call: false,
+    ...TEXT_ONLY_CAPABILITIES,
     cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
     limit: { context: 128000, output: 8192 },
   },
@@ -50,10 +54,7 @@ export function createTraeModelDefinition(id: string, description?: string, cont
   return {
     id,
     name: description || id,
-    attachment: false,
-    reasoning: false,
-    temperature: false,
-    tool_call: false,
+    ...TEXT_ONLY_CAPABILITIES,
     cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
     limit: { context: contextWindow ?? 128000, output: 8192 },
   }

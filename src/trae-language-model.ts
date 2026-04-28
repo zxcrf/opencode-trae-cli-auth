@@ -7,11 +7,14 @@ import type {
   LanguageModelV2Usage,
   ProviderV2,
 } from '@ai-sdk/provider'
-import { spawn } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { buildPromptFromOptions } from './prompt-builder.js'
+import type { TraeCliResult } from './cli/json-output.js'
+import { contentToText } from './cli/text-content.js'
+import { mapUsage } from './cli/usage.js'
+import { runCliLlm } from './cli/cli-runner.js'
 
 export type TraeProviderOptions = {
   cliPath?: string
@@ -19,16 +22,6 @@ export type TraeProviderOptions = {
   queryTimeout?: number
   extraArgs?: string[]
   sessionId?: string
-}
-
-type TraeCliResult = {
-  message?: {
-    content?: unknown
-    response_meta?: {
-      usage?: Record<string, unknown>
-    }
-  }
-  usage?: Record<string, unknown>
 }
 
 function decorateFinishReason(reason: LanguageModelV2FinishReason): LanguageModelV2FinishReason {
@@ -121,13 +114,13 @@ export class TraeLanguageModel implements LanguageModelV2 {
       start: async (controller) => {
         controller.enqueue({ type: 'stream-start', warnings: [] })
         try {
-          const result = await runTraeCli({
+          const result = await runCliLlm({
             cliPath,
             modelName: this.providerOptions?.modelName ?? (this.modelId === 'default' ? undefined : this.modelId),
             prompt: buildPromptFromOptions(options),
             queryTimeout: this.providerOptions?.queryTimeout,
             extraArgs: this.providerOptions?.extraArgs,
-            sessionId: this.providerOptions?.sessionId,
+            abortSignal: options.abortSignal,
           })
           emitResult(controller, result)
         } catch (error) {
@@ -158,148 +151,5 @@ function emitResult(controller: ReadableStreamDefaultController<LanguageModelV2S
     type: 'finish',
     finishReason: decorateFinishReason('stop'),
     usage: mapUsage(result.usage ?? result.message?.response_meta?.usage),
-  })
-}
-
-function contentToText(content: unknown): string[] {
-  if (typeof content === 'string') return [content]
-  if (!Array.isArray(content)) return []
-  const chunks: string[] = []
-  for (const item of content) {
-    if (typeof item === 'string') {
-      chunks.push(item)
-      continue
-    }
-    if (!item || typeof item !== 'object') continue
-    const record = item as Record<string, unknown>
-    if (record.type === 'text' && typeof record.text === 'string') chunks.push(record.text)
-    if (record.type === 'output_text' && typeof record.text === 'string') chunks.push(record.text)
-  }
-  return chunks
-}
-
-function mapUsage(usage: Record<string, unknown> | undefined): LanguageModelV2Usage {
-  const inputTokens = pickNumber(usage?.input_tokens ?? usage?.inputTokens ?? usage?.prompt_tokens)
-  const outputTokens = pickNumber(usage?.output_tokens ?? usage?.outputTokens ?? usage?.completion_tokens)
-  const totalTokens = pickNumber(usage?.total_tokens ?? usage?.totalTokens) ??
-    (inputTokens !== undefined || outputTokens !== undefined ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined)
-  return { inputTokens, outputTokens, totalTokens }
-}
-
-function pickNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function parseLastJsonValue(text: string): TraeCliResult {
-  const trimmed = text.trim()
-  let fallback: TraeCliResult | undefined
-  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
-    const ch = trimmed[i]
-    if (ch !== '{' && ch !== '[') continue
-    const candidate = trimmed.slice(i)
-    const end = findJsonEnd(candidate)
-    if (end > 0) {
-      try {
-        const parsed = JSON.parse(candidate.slice(0, end)) as TraeCliResult
-        if (parsed && typeof parsed === 'object' && 'message' in parsed) return parsed
-        fallback = fallback ?? parsed
-      } catch {
-        continue
-      }
-    }
-  }
-  if (fallback) return fallback
-  throw new Error('Unable to parse traecli JSON output')
-}
-
-function findJsonEnd(text: string): number {
-  const stack: string[] = []
-  let inString = false
-  let escaped = false
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i]
-    if (inString) {
-      if (escaped) {
-        escaped = false
-      } else if (ch === '\\') {
-        escaped = true
-      } else if (ch === '"') {
-        inString = false
-      }
-      continue
-    }
-    if (ch === '"') {
-      inString = true
-      continue
-    }
-    if (ch === '{' || ch === '[') {
-      stack.push(ch)
-      continue
-    }
-    if (ch === '}' || ch === ']') {
-      const open = stack.pop()
-      if (!open) return -1
-      if ((open === '{' && ch !== '}') || (open === '[' && ch !== ']')) return -1
-      if (stack.length === 0) return i + 1
-    }
-  }
-  return -1
-}
-
-async function runTraeCli(args: {
-  cliPath?: string
-  modelName?: string
-  prompt: string
-  queryTimeout?: number
-  extraArgs?: string[]
-  sessionId?: string
-}): Promise<TraeCliResult> {
-  if (!args.cliPath) {
-    throw new Error('traecli binary not found. Install traecli and ensure it is on PATH.')
-  }
-
-  const cliArgs = [
-    args.prompt,
-    '-p',
-    '--json',
-    '--query-timeout',
-    formatDuration(args.queryTimeout ?? 120),
-    ...(args.modelName ? ['--config', `model.name=${args.modelName}`] : []),
-    ...(args.sessionId ? ['--session-id', args.sessionId] : []),
-    ...(args.extraArgs ?? []),
-  ]
-
-  const child = spawn(args.cliPath, cliArgs, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
-  })
-
-  const stdoutPromise = readStream(child.stdout)
-  const stderrPromise = readStream(child.stderr)
-  const exitCode = await new Promise<number | null>((resolve, reject) => {
-    child.once('error', reject)
-    child.once('close', (code) => resolve(code))
-  })
-  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise])
-
-  if (exitCode !== 0 && !stdout.trim()) {
-    throw new Error(stderr.trim() || `traecli exited with code ${exitCode}`)
-  }
-
-  return parseLastJsonValue(`${stdout}\n${stderr}`)
-}
-
-function formatDuration(seconds: number): string {
-  return `${Math.max(1, Math.floor(seconds))}s`
-}
-
-function readStream(stream: NodeJS.ReadableStream | null): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!stream) return resolve('')
-    const chunks: string[] = []
-    stream.setEncoding('utf8')
-    stream.on('data', (chunk: string) => chunks.push(chunk))
-    stream.once('error', reject)
-    stream.once('end', () => resolve(chunks.join('')))
   })
 }

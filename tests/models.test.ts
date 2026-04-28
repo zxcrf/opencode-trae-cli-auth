@@ -8,6 +8,14 @@ describe('trae models', () => {
     expect(TRAE_MODELS.default.tool_call).toBe(false)
   })
 
+  it('advertises Trae as text-only without tool calling or attachments', () => {
+    for (const [id, model] of Object.entries(TRAE_MODELS)) {
+      expect(model.attachment, `${id}.attachment`).toBe(false)
+      expect(model.tool_call, `${id}.tool_call`).toBe(false)
+      expect(model.reasoning, `${id}.reasoning`).toBe(false)
+    }
+  })
+
   it('returns model by id', () => {
     expect(getModelById('default')?.name).toContain('Trae')
   })
