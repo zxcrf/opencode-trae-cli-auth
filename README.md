@@ -148,10 +148,10 @@ type TraePluginOptions = {
 ## Development
 
 ```bash
-npm install
-npm test
-npm run build
-npm pack --dry-run
+bun install
+bun run test
+bun run build
+bun pm pack --dry-run
 ```
 
 Smoke check a local Trae CLI and OpenCode install:
@@ -159,6 +159,12 @@ Smoke check a local Trae CLI and OpenCode install:
 ```bash
 traecli "reply with ok" -p --json
 opencode run --model trae/default "reply with ok"
+```
+
+Optional soak test (success rate + latency summary):
+
+```bash
+bun run soak -- --model trae/default --runs 12 --concurrency 3
 ```
 
 

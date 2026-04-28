@@ -16,8 +16,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepack": "npm run build",
-    "prepublishOnly": "npm test && npm run build",
+    "soak": "bun scripts/soak-run.mjs",
+    "prepack": "bun run build",
+    "prepublishOnly": "bun run test && bun run build",
     "test": "vitest run"
   },
   "dependencies": {
