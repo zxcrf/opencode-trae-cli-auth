@@ -18,18 +18,10 @@ export interface TraeModelDefinition {
 }
 
 export const TRAE_CLOUD_MODEL_IDS = [
-  'Doubao-Seed-2.0-Code',
   'Doubao-Seed-Code',
   'GLM-5.1',
-  'GLM-5',
-  'GLM-4.7',
   'MiniMax-M2.7',
-  'MiniMax-M2.5',
-  'Qwen3-Coder-Next',
   'Kimi-K2.6',
-  'Kimi-K2.5',
-  'DeepSeek-V3.2',
-  'DeepSeek-V3.1-Terminus',
 ] as const
 
 export const TRAE_MODELS: Record<string, TraeModelDefinition> = {

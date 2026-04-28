@@ -13,9 +13,15 @@ describe('trae models', () => {
   })
 
   it('exposes known Trae cloud model ids discovered from /model', () => {
-    expect(TRAE_CLOUD_MODEL_IDS).toContain('Doubao-Seed-2.0-Code')
+    expect(TRAE_CLOUD_MODEL_IDS).toEqual([
+      'Doubao-Seed-Code',
+      'GLM-5.1',
+      'MiniMax-M2.7',
+      'Kimi-K2.6',
+    ])
     expect(TRAE_CLOUD_MODEL_IDS).toContain('GLM-5.1')
-    expect(TRAE_CLOUD_MODEL_IDS).toContain('DeepSeek-V3.1-Terminus')
+    expect(TRAE_CLOUD_MODEL_IDS).not.toContain('DeepSeek-V3.1-Terminus')
+    expect(TRAE_CLOUD_MODEL_IDS).not.toContain('Doubao-Seed-2.0-Code')
     for (const id of TRAE_CLOUD_MODEL_IDS) {
       expect(TRAE_MODELS[id]?.id).toBe(id)
       expect(TRAE_MODELS[id]?.tool_call).toBe(false)
