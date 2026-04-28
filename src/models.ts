@@ -28,6 +28,7 @@ export const TRAE_MODEL_PROFILES = {
   fast: 'MiniMax-M2.7',
   balanced: 'GLM-5.1',
   strong: 'Kimi-K2.6',
+  coding: 'GLM-5.1',
 } as const
 
 const TEXT_ONLY_CAPABILITIES = {
@@ -51,6 +52,7 @@ export const TRAE_MODELS: Record<string, TraeModelDefinition> = {
   fast: createTraeModelDefinition('fast', `Trae Fast (${TRAE_MODEL_PROFILES.fast})`),
   balanced: createTraeModelDefinition('balanced', `Trae Balanced (${TRAE_MODEL_PROFILES.balanced})`),
   strong: createTraeModelDefinition('strong', `Trae Strong (${TRAE_MODEL_PROFILES.strong})`),
+  coding: createTraeModelDefinition('coding', `Trae Coding (${TRAE_MODEL_PROFILES.coding})`),
 }
 
 export const DEFAULT_MODEL_ID = 'default'

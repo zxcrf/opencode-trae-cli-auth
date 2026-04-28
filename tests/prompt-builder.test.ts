@@ -97,4 +97,20 @@ describe('prompt builder', () => {
     expect(prompt).toContain('[Prompt truncated:')
     expect(prompt).toContain('TAIL')
   })
+
+  it('keeps only recent non-system messages when maxMessages is set', () => {
+    const prompt = buildPrompt([
+      { role: 'system', content: 'Always concise.' },
+      { role: 'user', content: [{ type: 'text', text: 'u1' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'a1' }] },
+      { role: 'user', content: [{ type: 'text', text: 'u2' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'a2' }] },
+    ] as any, { maxMessages: 2 })
+
+    expect(prompt).toContain('<system>\nAlways concise.\n</system>')
+    expect(prompt).not.toContain('<user>\nu1\n</user>')
+    expect(prompt).not.toContain('<assistant>\na1\n</assistant>')
+    expect(prompt).toContain('<user>\nu2\n</user>')
+    expect(prompt).toContain('<assistant>\na2\n</assistant>')
+  })
 })

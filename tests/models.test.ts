@@ -24,9 +24,11 @@ describe('trae models', () => {
     expect(TRAE_MODEL_PROFILES.fast).toBe('MiniMax-M2.7')
     expect(TRAE_MODEL_PROFILES.balanced).toBe('GLM-5.1')
     expect(TRAE_MODEL_PROFILES.strong).toBe('Kimi-K2.6')
+    expect(TRAE_MODEL_PROFILES.coding).toBe('GLM-5.1')
     expect(TRAE_MODELS.fast?.tool_call).toBe(false)
     expect(TRAE_MODELS.balanced?.tool_call).toBe(false)
     expect(TRAE_MODELS.strong?.tool_call).toBe(false)
+    expect(TRAE_MODELS.coding?.tool_call).toBe(false)
   })
 
   it('exposes known Trae cloud model ids discovered from /model', () => {

@@ -85,6 +85,7 @@ Built-in model ids currently include:
 - `trae/fast` (alias to `MiniMax-M2.7`)
 - `trae/balanced` (alias to `GLM-5.1`)
 - `trae/strong` (alias to `Kimi-K2.6`)
+- `trae/coding` (alias to `GLM-5.1`)
 - `trae/MiniMax-M2.5`
 - `trae/Qwen3-Coder-Next`
 - `trae/Kimi-K2.6`
@@ -124,6 +125,7 @@ type TraePluginOptions = {
   enableToolCalling?: boolean
   queryTimeout?: number
   includeToolHistory?: boolean
+  maxPromptMessages?: number
   maxPromptChars?: number
   enforceTextOnly?: boolean
   maxRetries?: number
@@ -139,6 +141,7 @@ type TraePluginOptions = {
 - `enableToolCalling`: experimental, defaults to `false`; when `true`, provider forwards Trae `function` tool calls to OpenCode.
 - `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
 - `includeToolHistory`: defaults to `false`; omit prior `tool-call/tool-result` history from prompt to reduce context bloat in text-only mode.
+- `maxPromptMessages`: defaults to `40`; keep all `system` messages and only the most recent non-system messages.
 - `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.
 - `enforceTextOnly`: defaults to `true`; adds `--disallowed-tool` flags for common tools (`Read/Bash/Edit/Replace/Write/Glob/Grep/Task`) to keep Trae CLI in text-only behavior.
 - `maxRetries`: transient error retry count, default `1`.
@@ -167,6 +170,45 @@ Smoke check a local Trae CLI and OpenCode install:
 ```bash
 traecli "reply with ok" -p --json
 opencode run --model trae/default "reply with ok"
+```
+
+Recommended local config presets:
+
+Text-only stable preset:
+
+```json
+{
+  "provider": {
+    "trae": {
+      "options": {
+        "enableToolCalling": false,
+        "enforceTextOnly": true,
+        "maxPromptMessages": 40,
+        "maxPromptChars": 12000
+      }
+    }
+  },
+  "model": "trae/coding"
+}
+```
+
+Experimental tool-calling preset:
+
+```json
+{
+  "provider": {
+    "trae": {
+      "options": {
+        "enableToolCalling": true,
+        "includeToolHistory": true,
+        "enforceTextOnly": false,
+        "maxPromptMessages": 50,
+        "maxPromptChars": 16000
+      }
+    }
+  },
+  "model": "trae/coding"
+}
 ```
 
 Optional soak test (success rate + latency summary):

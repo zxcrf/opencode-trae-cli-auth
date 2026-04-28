@@ -3,6 +3,7 @@ import type { LanguageModelV2CallOptions, LanguageModelV2Message, LanguageModelV
 type PromptBuildOptions = {
   includeToolHistory?: boolean
   maxChars?: number
+  maxMessages?: number
 }
 
 export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buildOptions?: PromptBuildOptions): string {
@@ -10,9 +11,10 @@ export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buil
 }
 
 export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: PromptBuildOptions): string {
+  const selectedPrompt = trimMessages(prompt, buildOptions?.maxMessages)
   const lines: string[] = []
   const includeToolHistory = buildOptions?.includeToolHistory === true
-  for (const message of prompt) {
+  for (const message of selectedPrompt) {
     lines.push(serializeMessage(message, includeToolHistory))
   }
   const text = lines.filter(Boolean).join('\n\n') || 'Hello'
@@ -85,4 +87,22 @@ function trimPrompt(prompt: string, maxChars?: number): string {
   const suffix = prompt.slice(prompt.length - limit)
   const truncated = prompt.length - suffix.length
   return `[Prompt truncated: ${truncated} chars omitted]\n${suffix}`
+}
+
+function trimMessages(prompt: LanguageModelV2Prompt, maxMessages?: number): LanguageModelV2Prompt {
+  if (typeof maxMessages !== 'number' || !Number.isFinite(maxMessages)) return prompt
+  const limit = Math.max(1, Math.floor(maxMessages))
+  const nonSystemIndexes: number[] = []
+  for (let i = 0; i < prompt.length; i += 1) {
+    if (prompt[i].role !== 'system') nonSystemIndexes.push(i)
+  }
+  if (nonSystemIndexes.length <= limit) return prompt
+
+  const keepNonSystem = new Set(nonSystemIndexes.slice(nonSystemIndexes.length - limit))
+  const out: LanguageModelV2Message[] = []
+  for (let i = 0; i < prompt.length; i += 1) {
+    const message = prompt[i]
+    if (message.role === 'system' || keepNonSystem.has(i)) out.push(message)
+  }
+  return out
 }

@@ -24,6 +24,7 @@ export type TraeProviderOptions = {
   enableToolCalling?: boolean
   queryTimeout?: number
   includeToolHistory?: boolean
+  maxPromptMessages?: number
   maxPromptChars?: number
   extraArgs?: string[]
   enforceTextOnly?: boolean
@@ -128,6 +129,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
             modelName: selectedModel,
             prompt: buildPromptFromOptions(options, {
               includeToolHistory: this.providerOptions?.includeToolHistory ?? this.providerOptions?.enableToolCalling === true,
+              maxMessages: this.providerOptions?.maxPromptMessages ?? 40,
               maxChars: this.providerOptions?.maxPromptChars ?? 12000,
             }),
             queryTimeout: this.providerOptions?.queryTimeout,

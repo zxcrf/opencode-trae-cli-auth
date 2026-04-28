@@ -11,6 +11,7 @@ type TraePluginOptions = {
   enableToolCalling?: boolean
   queryTimeout?: number
   includeToolHistory?: boolean
+  maxPromptMessages?: number
   maxPromptChars?: number
   enforceTextOnly?: boolean
   maxRetries?: number
@@ -47,6 +48,7 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(typeof options.enableToolCalling === 'boolean' ? { enableToolCalling: options.enableToolCalling } : {}),
           ...(typeof options.queryTimeout === 'number' ? { queryTimeout: options.queryTimeout } : {}),
           ...(typeof options.includeToolHistory === 'boolean' ? { includeToolHistory: options.includeToolHistory } : {}),
+          ...(typeof options.maxPromptMessages === 'number' ? { maxPromptMessages: options.maxPromptMessages } : {}),
           ...(typeof options.maxPromptChars === 'number' ? { maxPromptChars: options.maxPromptChars } : {}),
           ...(typeof options.enforceTextOnly === 'boolean' ? { enforceTextOnly: options.enforceTextOnly } : {}),
           ...(typeof options.maxRetries === 'number' ? { maxRetries: options.maxRetries } : {}),
