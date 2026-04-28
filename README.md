@@ -121,6 +121,7 @@ type TraePluginOptions = {
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
+  enableToolCalling?: boolean
   queryTimeout?: number
   includeToolHistory?: boolean
   maxPromptChars?: number
@@ -135,6 +136,7 @@ type TraePluginOptions = {
 - `cliPath`: override the `traecli` binary path.
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
 - `modelAliases`: optional alias map, e.g. `{ coding: "GLM-5.1" }`, so users can call `trae/coding`.
+- `enableToolCalling`: experimental, defaults to `false`; when `true`, provider forwards Trae `function` tool calls to OpenCode.
 - `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
 - `includeToolHistory`: defaults to `false`; omit prior `tool-call/tool-result` history from prompt to reduce context bloat in text-only mode.
 - `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.
@@ -146,7 +148,8 @@ type TraePluginOptions = {
 
 ## Known limitations
 
-- This provider is text-only by design. It does not support OpenCode tool/function calling and does not use Trae CLI as an agent runtime.
+- By default this provider is text-only and does not use Trae CLI as an agent runtime.
+- Experimental mode: `enableToolCalling=true` only supports forwarding function tool calls observed in Trae JSON output; behavior may vary across Trae CLI versions.
 - Usage/token counts may be zero when Trae CLI does not emit usage metadata.
 - Trae CLI may print `keyring is not supported on this system`; this is a Trae CLI environment warning and usually does not prevent responses.
 

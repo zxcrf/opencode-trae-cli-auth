@@ -1,4 +1,17 @@
 export type TraeCliResult = {
+  agent_states?: Array<{
+    messages?: Array<{
+      role?: string
+      tool_calls?: Array<{
+        id?: string
+        type?: string
+        function?: {
+          name?: string
+          arguments?: string
+        }
+      }>
+    }>
+  }>
   message?: {
     content?: unknown
     response_meta?: {
@@ -28,6 +41,40 @@ export function parseLastJsonValue(text: string): TraeCliResult {
   }
   if (fallback) return fallback
   throw new Error(`Unable to parse traecli JSON output: ${trimmed.slice(0, 240)}`)
+}
+
+export type TraeFunctionToolCall = {
+  id: string
+  name: string
+  input: string
+}
+
+export function extractFunctionToolCalls(result: TraeCliResult): TraeFunctionToolCall[] {
+  const allMessages = (result.agent_states ?? []).flatMap((state) => state.messages ?? [])
+  const calls: TraeFunctionToolCall[] = []
+  for (const msg of allMessages) {
+    if (msg.role !== 'assistant' || !Array.isArray(msg.tool_calls)) continue
+    for (const call of msg.tool_calls) {
+      if (call?.type !== 'function') continue
+      const id = String(call.id ?? '').trim()
+      const name = String(call.function?.name ?? '').trim()
+      if (!id || !name) continue
+      calls.push({
+        id,
+        name,
+        input: normalizeJsonText(call.function?.arguments),
+      })
+    }
+  }
+
+  const deduped = new Map<string, TraeFunctionToolCall>()
+  for (const call of calls) deduped.set(call.id, call)
+  return [...deduped.values()]
+}
+
+function normalizeJsonText(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value
+  return '{}'
 }
 
 function findJsonEnd(text: string): number {

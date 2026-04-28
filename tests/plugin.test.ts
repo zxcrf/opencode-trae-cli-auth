@@ -41,6 +41,7 @@ describe('TraeProviderPlugin', () => {
       cliPath: '/custom/traecli',
       queryTimeout: 33,
       modelAliases: { coding: 'GLM-5.1' },
+      enableToolCalling: true,
       includeToolHistory: false,
       maxPromptChars: 16000,
       enforceTextOnly: true,
@@ -54,14 +55,15 @@ describe('TraeProviderPlugin', () => {
     expect(config.provider?.trae).toBeDefined()
     expect(config.provider?.trae?.name).toBe('Trae')
     expect(config.provider?.trae?.npm).toMatch(/^file:\/\//)
-    expect(config.provider?.trae?.models?.default?.tool_call).toBe(false)
+    expect(config.provider?.trae?.models?.default?.tool_call).toBe(true)
     expect(config.provider?.trae?.models?.sonnet?.name).toBe('Claude Sonnet')
-    expect(config.provider?.trae?.models?.sonnet?.tool_call).toBe(false)
+    expect(config.provider?.trae?.models?.sonnet?.tool_call).toBe(true)
     expect(config.provider?.trae?.models?.sonnet?.attachment).toBe(false)
     expect(config.provider?.trae?.options).toMatchObject({
       cliPath: '/custom/traecli',
       queryTimeout: 33,
       modelAliases: { coding: 'GLM-5.1' },
+      enableToolCalling: true,
       includeToolHistory: false,
       maxPromptChars: 16000,
       enforceTextOnly: true,

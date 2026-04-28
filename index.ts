@@ -1,8 +1,6 @@
 import type { Hooks, Plugin } from '@opencode-ai/plugin'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
-import { TRAE_MODELS } from './src/models.js'
+import { TRAE_MODELS, type TraeModelDefinition } from './src/models.js'
 import { discoverTraeModels } from './src/trae-config-models.js'
 import { resolveTraeCliPath } from './src/trae-language-model.js'
 
@@ -10,6 +8,7 @@ type TraePluginOptions = {
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
+  enableToolCalling?: boolean
   queryTimeout?: number
   includeToolHistory?: boolean
   maxPromptChars?: number
@@ -31,7 +30,10 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
       config.provider = config.provider ?? {}
       const existing = config.provider.trae ?? {}
       const discoveredModels = discoverTraeModels()
-      const mergedModels = { ...TRAE_MODELS, ...discoveredModels, ...(existing.models ?? {}) }
+      const mergedModels = applyCapabilityOverrides(
+        { ...TRAE_MODELS, ...discoveredModels, ...(existing.models ?? {}) },
+        options,
+      )
 
       config.provider.trae = {
         ...existing,
@@ -42,6 +44,7 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(options.cliPath ? { cliPath: options.cliPath } : {}),
           ...(options.modelName ? { modelName: options.modelName } : {}),
           ...(typeof options.modelAliases === 'object' && options.modelAliases ? { modelAliases: options.modelAliases } : {}),
+          ...(typeof options.enableToolCalling === 'boolean' ? { enableToolCalling: options.enableToolCalling } : {}),
           ...(typeof options.queryTimeout === 'number' ? { queryTimeout: options.queryTimeout } : {}),
           ...(typeof options.includeToolHistory === 'boolean' ? { includeToolHistory: options.includeToolHistory } : {}),
           ...(typeof options.maxPromptChars === 'number' ? { maxPromptChars: options.maxPromptChars } : {}),
@@ -80,3 +83,13 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
 }
 
 export default TraeProviderPlugin
+
+function applyCapabilityOverrides(
+  models: Record<string, TraeModelDefinition>,
+  options: TraePluginOptions,
+): Record<string, TraeModelDefinition> {
+  if (options.enableToolCalling !== true) return models
+  return Object.fromEntries(
+    Object.entries(models).map(([id, model]) => [id, { ...model, tool_call: true }]),
+  )
+}

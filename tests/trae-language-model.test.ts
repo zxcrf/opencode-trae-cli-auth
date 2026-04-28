@@ -233,4 +233,59 @@ describe('TraeLanguageModel', () => {
     expect(parts.map((p) => p.type)).toEqual(['stream-start', 'error', 'finish'])
     expect(parts.at(-1).finishReason).toBe('error')
   })
+
+  it('emits tool-call events when experimental tool calling is enabled', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-1',
+                    type: 'function',
+                    function: { name: 'read', arguments: '{"path":"README.md"}' },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'tooling' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.map((p) => p.type)).toContain('tool-call')
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-1',
+      toolName: 'read',
+      input: '{"path":"README.md"}',
+    })
+    expect(parts.at(-1).finishReason).toBe('tool-calls')
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args).not.toContain('--disallowed-tool')
+  })
 })

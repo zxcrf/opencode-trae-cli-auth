@@ -11,7 +11,7 @@ import { accessSync, constants } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { buildPromptFromOptions } from './prompt-builder.js'
-import type { TraeCliResult } from './cli/json-output.js'
+import { extractFunctionToolCalls, type TraeCliResult } from './cli/json-output.js'
 import { contentToText } from './cli/text-content.js'
 import { mapUsage } from './cli/usage.js'
 import { runCliLlm } from './cli/cli-runner.js'
@@ -21,6 +21,7 @@ export type TraeProviderOptions = {
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
+  enableToolCalling?: boolean
   queryTimeout?: number
   includeToolHistory?: boolean
   maxPromptChars?: number
@@ -126,17 +127,17 @@ export class TraeLanguageModel implements LanguageModelV2 {
             cliPath,
             modelName: selectedModel,
             prompt: buildPromptFromOptions(options, {
-              includeToolHistory: this.providerOptions?.includeToolHistory,
+              includeToolHistory: this.providerOptions?.includeToolHistory ?? this.providerOptions?.enableToolCalling === true,
               maxChars: this.providerOptions?.maxPromptChars ?? 12000,
             }),
             queryTimeout: this.providerOptions?.queryTimeout,
             extraArgs: this.providerOptions?.extraArgs,
-            enforceTextOnly: this.providerOptions?.enforceTextOnly,
+            enforceTextOnly: resolveEnforceTextOnly(this.providerOptions),
             maxRetries: this.providerOptions?.maxRetries,
             retryDelayMs: this.providerOptions?.retryDelayMs,
             abortSignal: options.abortSignal,
           })
-          emitResult(controller, result)
+          emitResult(controller, result, this.providerOptions?.enableToolCalling === true)
         } catch (error) {
           controller.enqueue({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) })
           controller.enqueue({
@@ -164,16 +165,38 @@ function resolveTraeModelName(modelId: string, options?: TraeProviderOptions): s
   return aliases[modelId] ?? modelId
 }
 
-function emitResult(controller: ReadableStreamDefaultController<LanguageModelV2StreamPart>, result: TraeCliResult): void {
+function emitResult(
+  controller: ReadableStreamDefaultController<LanguageModelV2StreamPart>,
+  result: TraeCliResult,
+  enableToolCalling: boolean,
+): void {
   const parts = contentToText(result.message?.content)
+  const toolCalls = enableToolCalling ? extractFunctionToolCalls(result) : []
   if (parts.length > 0) controller.enqueue({ type: 'text-start', id: 'trae-0' })
   for (const part of parts) {
     controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: part })
   }
   if (parts.length > 0) controller.enqueue({ type: 'text-end', id: 'trae-0' })
+  for (const call of toolCalls) {
+    controller.enqueue({ type: 'tool-input-start', id: call.id, toolName: call.name } as LanguageModelV2StreamPart)
+    controller.enqueue({ type: 'tool-input-delta', id: call.id, delta: call.input } as LanguageModelV2StreamPart)
+    controller.enqueue({ type: 'tool-input-end', id: call.id } as LanguageModelV2StreamPart)
+    controller.enqueue({
+      type: 'tool-call',
+      toolCallId: call.id,
+      toolName: call.name,
+      input: call.input,
+    } as LanguageModelV2StreamPart)
+  }
   controller.enqueue({
     type: 'finish',
-    finishReason: decorateFinishReason('stop'),
+    finishReason: decorateFinishReason(toolCalls.length > 0 ? 'tool-calls' : 'stop'),
     usage: mapUsage(result.usage ?? result.message?.response_meta?.usage),
   })
+}
+
+function resolveEnforceTextOnly(options?: TraeProviderOptions): boolean | undefined {
+  if (typeof options?.enforceTextOnly === 'boolean') return options.enforceTextOnly
+  if (options?.enableToolCalling === true) return false
+  return undefined
 }
