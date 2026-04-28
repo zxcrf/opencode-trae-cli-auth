@@ -119,6 +119,7 @@ describe('runCliLlm', () => {
       cliPath: '/usr/bin/traecli',
       prompt: 'hello',
       queryTimeout: 1,
+      maxRetries: 0,
     })
 
     await vi.advanceTimersByTimeAsync(1000)
@@ -128,5 +129,33 @@ describe('runCliLlm', () => {
 
     await expect(promise).rejects.toThrow(/timed out after 1s/)
     expect(child.kill).toHaveBeenCalled()
+  })
+
+  it('retries once on transient failure', async () => {
+    const first = makeChild()
+    const second = makeChild()
+    spawnMock.mockImplementationOnce(() => first.child).mockImplementationOnce(() => {
+      setImmediate(() => {
+        second.stdout.end('')
+        second.stderr.end('tenantsecurity: fetch mcp whitelist returned code 30017')
+        second.child.emit('close', 2)
+      })
+      return second.child
+    })
+    const { runCliLlm } = await import('../src/cli/cli-runner.js')
+
+    const promise = runCliLlm({
+      cliPath: '/usr/bin/traecli',
+      prompt: 'hello',
+      retryDelayMs: 0,
+      maxRetries: 1,
+    })
+
+    first.stdout.end('')
+    first.stderr.end('tenantsecurity: fetch mcp whitelist returned code 30017')
+    first.child.emit('close', 2)
+
+    await expect(promise).rejects.toThrow(/tenantsecurity/i)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
   })
 })

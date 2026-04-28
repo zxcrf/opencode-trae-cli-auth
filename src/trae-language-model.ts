@@ -22,6 +22,8 @@ export type TraeProviderOptions = {
   queryTimeout?: number
   extraArgs?: string[]
   enforceTextOnly?: boolean
+  maxRetries?: number
+  retryDelayMs?: number
   sessionId?: string
 }
 
@@ -122,6 +124,8 @@ export class TraeLanguageModel implements LanguageModelV2 {
             queryTimeout: this.providerOptions?.queryTimeout,
             extraArgs: this.providerOptions?.extraArgs,
             enforceTextOnly: this.providerOptions?.enforceTextOnly,
+            maxRetries: this.providerOptions?.maxRetries,
+            retryDelayMs: this.providerOptions?.retryDelayMs,
             abortSignal: options.abortSignal,
           })
           emitResult(controller, result)

@@ -10,6 +10,9 @@ type TraePluginOptions = {
   cliPath?: string
   modelName?: string
   queryTimeout?: number
+  enforceTextOnly?: boolean
+  maxRetries?: number
+  retryDelayMs?: number
   extraArgs?: string[]
   sessionId?: string
 }
@@ -36,6 +39,9 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(options.cliPath ? { cliPath: options.cliPath } : {}),
           ...(options.modelName ? { modelName: options.modelName } : {}),
           ...(typeof options.queryTimeout === 'number' ? { queryTimeout: options.queryTimeout } : {}),
+          ...(typeof options.enforceTextOnly === 'boolean' ? { enforceTextOnly: options.enforceTextOnly } : {}),
+          ...(typeof options.maxRetries === 'number' ? { maxRetries: options.maxRetries } : {}),
+          ...(typeof options.retryDelayMs === 'number' ? { retryDelayMs: options.retryDelayMs } : {}),
           ...(Array.isArray(options.extraArgs) ? { extraArgs: options.extraArgs } : {}),
           ...(typeof options.sessionId === 'string' ? { sessionId: options.sessionId } : {}),
         },

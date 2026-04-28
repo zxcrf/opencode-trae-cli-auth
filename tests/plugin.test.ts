@@ -37,7 +37,14 @@ describe('TraeProviderPlugin', () => {
   })
 
   it('injects provider metadata and options', async () => {
-    const hooks = await pluginModule.TraeProviderPlugin({ cliPath: '/custom/traecli', queryTimeout: 33, extraArgs: ['--verbose'] })
+    const hooks = await pluginModule.TraeProviderPlugin({
+      cliPath: '/custom/traecli',
+      queryTimeout: 33,
+      enforceTextOnly: true,
+      maxRetries: 2,
+      retryDelayMs: 400,
+      extraArgs: ['--verbose'],
+    })
     const config = {} as Config
     await hooks.config!(config)
 
@@ -48,7 +55,14 @@ describe('TraeProviderPlugin', () => {
     expect(config.provider?.trae?.models?.sonnet?.name).toBe('Claude Sonnet')
     expect(config.provider?.trae?.models?.sonnet?.tool_call).toBe(false)
     expect(config.provider?.trae?.models?.sonnet?.attachment).toBe(false)
-    expect(config.provider?.trae?.options).toMatchObject({ cliPath: '/custom/traecli', queryTimeout: 33, extraArgs: ['--verbose'] })
+    expect(config.provider?.trae?.options).toMatchObject({
+      cliPath: '/custom/traecli',
+      queryTimeout: 33,
+      enforceTextOnly: true,
+      maxRetries: 2,
+      retryDelayMs: 400,
+      extraArgs: ['--verbose'],
+    })
   })
 
   it('authorize succeeds when traecli is available', async () => {

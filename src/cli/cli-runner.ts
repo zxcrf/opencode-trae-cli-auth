@@ -8,6 +8,8 @@ export type CliLlmRunOptions = {
   queryTimeout?: number
   extraArgs?: string[]
   enforceTextOnly?: boolean
+  maxRetries?: number
+  retryDelayMs?: number
   abortSignal?: AbortSignal
 }
 
@@ -18,6 +20,24 @@ export async function runCliLlm(args: CliLlmRunOptions): Promise<TraeCliResult> 
     throw new Error('traecli binary not found. Install traecli and ensure it is on PATH.')
   }
 
+  const maxRetries = normalizeRetryCount(args.maxRetries ?? 1)
+  const retryDelayMs = normalizeDelayMs(args.retryDelayMs ?? 800)
+  let lastError: Error | undefined
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await runOnce(args)
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      if (!shouldRetry(lastError, attempt, maxRetries, args.abortSignal)) throw lastError
+      await waitWithAbort(retryDelayMs, args.abortSignal)
+    }
+  }
+
+  throw lastError ?? new Error('traecli request failed')
+}
+
+async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
   const disallowToolsArgs =
     args.enforceTextOnly === false ? [] : DEFAULT_DISALLOWED_TOOLS.flatMap((name) => ['--disallowed-tool', name])
 
@@ -72,12 +92,50 @@ export async function runCliLlm(args: CliLlmRunOptions): Promise<TraeCliResult> 
   }
 }
 
+function shouldRetry(error: Error, attempt: number, maxRetries: number, abortSignal?: AbortSignal): boolean {
+  if (abortSignal?.aborted) return false
+  if (attempt >= maxRetries) return false
+  const msg = error.message.toLowerCase()
+  return (
+    msg.includes('timed out') ||
+    msg.includes('tenantsecurity') ||
+    msg.includes('fetch mcp whitelist') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up') ||
+    msg.includes('connection reset')
+  )
+}
+
+function waitWithAbort(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      abortSignal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    timer.unref?.()
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new Error('traecli request aborted'))
+    }
+    if (abortSignal?.aborted) return onAbort()
+    abortSignal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 function formatDuration(seconds: number): string {
   return `${normalizeTimeoutSeconds(seconds)}s`
 }
 
 function normalizeTimeoutSeconds(seconds: number): number {
   return Math.max(1, Math.floor(seconds))
+}
+
+function normalizeRetryCount(count: number): number {
+  return Math.max(0, Math.floor(count))
+}
+
+function normalizeDelayMs(delayMs: number): number {
+  return Math.max(0, Math.floor(delayMs))
 }
 
 function readStream(stream: NodeJS.ReadableStream | null): Promise<string> {
