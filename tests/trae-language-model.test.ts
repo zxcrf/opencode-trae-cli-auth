@@ -342,4 +342,73 @@ describe('TraeLanguageModel', () => {
       input: '{"filePath":"README.md","oldString":"old","newString":"new","replaceAll":true}',
     })
   })
+
+  it('normalizes read offset and limit into valid positive integers', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'read file' }] }],
+      tools: [
+        {
+          type: 'function',
+          name: 'read',
+          description: 'Read file',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string' },
+              offset: { type: 'number' },
+              limit: { type: 'number' },
+            },
+          },
+        },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-read-2',
+                    type: 'function',
+                    function: {
+                      name: 'Read',
+                      arguments: '{"file_path":"README.md","offset":0,"limit":"0"}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'reading' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-read-2',
+      toolName: 'read',
+      input: '{"filePath":"README.md","offset":1,"limit":1}',
+    })
+  })
 })

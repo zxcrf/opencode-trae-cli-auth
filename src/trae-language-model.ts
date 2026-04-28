@@ -119,6 +119,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
 
   async doStream(options: LanguageModelV2CallOptions): Promise<{ stream: ReadableStream<LanguageModelV2StreamPart> }> {
     const cliPath = this.providerOptions?.cliPath ?? resolveTraeCliPath()
+    const toolSchemaHints = buildToolSchemaHints(options.tools)
     const stream = new ReadableStream<LanguageModelV2StreamPart>({
       start: async (controller) => {
         controller.enqueue({ type: 'stream-start', warnings: [] })
@@ -139,7 +140,12 @@ export class TraeLanguageModel implements LanguageModelV2 {
             retryDelayMs: this.providerOptions?.retryDelayMs,
             abortSignal: options.abortSignal,
           })
-          emitResult(controller, result, this.providerOptions?.enableToolCalling === true)
+          emitResult(
+            controller,
+            result,
+            this.providerOptions?.enableToolCalling === true,
+            toolSchemaHints,
+          )
         } catch (error) {
           controller.enqueue({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) })
           controller.enqueue({
@@ -171,6 +177,7 @@ function emitResult(
   controller: ReadableStreamDefaultController<LanguageModelV2StreamPart>,
   result: TraeCliResult,
   enableToolCalling: boolean,
+  toolSchemaHints: Record<string, Set<string>>,
 ): void {
   const parts = contentToText(result.message?.content)
   const toolCalls = enableToolCalling ? extractFunctionToolCalls(result) : []
@@ -181,7 +188,7 @@ function emitResult(
   if (parts.length > 0) controller.enqueue({ type: 'text-end', id: 'trae-0' })
   for (const call of toolCalls) {
     const toolName = normalizeToolName(call.name)
-    const normalizedInput = normalizeToolInput(toolName, call.input)
+    const normalizedInput = normalizeToolInput(toolName, call.input, toolSchemaHints[toolName])
     controller.enqueue({ type: 'tool-input-start', id: call.id, toolName } as LanguageModelV2StreamPart)
     controller.enqueue({ type: 'tool-input-delta', id: call.id, delta: normalizedInput } as LanguageModelV2StreamPart)
     controller.enqueue({ type: 'tool-input-end', id: call.id } as LanguageModelV2StreamPart)
@@ -205,15 +212,16 @@ function resolveEnforceTextOnly(options?: TraeProviderOptions): boolean | undefi
   return undefined
 }
 
-function normalizeToolInput(toolName: string, input: string): string {
+function normalizeToolInput(
+  toolName: string,
+  input: string,
+  schemaFields?: Set<string>,
+): string {
   const parsed = parseInputObject(input)
   if (!parsed) return input
   const normalizedToolName = toolName.toLowerCase()
   const normalized = normalizeToolInputObject(normalizedToolName, parsed)
-  if ((normalizedToolName === 'read' || normalizedToolName === 'read_file') && typeof normalized.filePath !== 'string') {
-    const pathValue = normalized.path ?? normalized.filepath ?? normalized.file_path
-    if (typeof pathValue === 'string' && pathValue.trim()) normalized.filePath = pathValue
-  }
+  applyPathAliases(normalized, schemaFields)
   return JSON.stringify(normalized)
 }
 
@@ -221,7 +229,37 @@ function normalizeToolInputObject(toolName: string, input: Record<string, unknow
   switch (toolName) {
     case 'read':
     case 'read_file':
+    case 'readfile':
+    case 'cat': {
+      const next = renameKeys(input, { file_path: 'filePath' })
+      const offset = pickNumber(next.offset)
+        ?? pickNumber(next.start)
+        ?? pickNumber(next.line)
+        ?? pickNumber(next.line_number)
+        ?? pickNumber(next.lineNumber)
+        ?? pickNumber(next.start_line)
+        ?? pickNumber(next.startLine)
+      if (offset !== undefined) next.offset = normalizeMinInt(offset, 1)
+      const limit = pickNumber(next.limit)
+        ?? pickNumber(next.length)
+        ?? pickNumber(next.lines)
+        ?? pickNumber(next.max_lines)
+        ?? pickNumber(next.maxLines)
+      if (limit !== undefined) next.limit = normalizeMinInt(limit, 1)
+      delete next.start
+      delete next.line
+      delete next.line_number
+      delete next.lineNumber
+      delete next.start_line
+      delete next.startLine
+      delete next.length
+      delete next.lines
+      delete next.max_lines
+      delete next.maxLines
+      return next
+    }
     case 'write':
+    case 'writefile':
       return renameKeys(input, { file_path: 'filePath' })
     case 'edit':
     case 'str_replace_based_edit_tool':
@@ -240,6 +278,24 @@ function normalizeToolInputObject(toolName: string, input: Record<string, unknow
       delete next.type
       delete next.output_mode
       delete next.multiline
+      return next
+    }
+    case 'glob': {
+      const next = renameKeys(input, {})
+      if (!pickString(next.pattern)) {
+        next.pattern = pickString(next.glob) ?? pickString(next.include) ?? '**/*'
+      }
+      delete next.glob
+      delete next.include
+      return next
+    }
+    case 'bash': {
+      const next = renameKeys(input, {})
+      if (!pickString(next.command)) {
+        next.command = pickString(next.cmd) ?? pickString(next.script) ?? ''
+      }
+      delete next.cmd
+      delete next.script
       return next
     }
     case 'question': {
@@ -279,6 +335,19 @@ function pickString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
+function pickNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function normalizeMinInt(value: number, min: number): number {
+  return Math.max(min, Math.floor(value))
+}
+
 function inferIncludeFromType(type: unknown): string | undefined {
   const ext = pickString(type)
   return ext ? `*.${ext}` : undefined
@@ -301,12 +370,70 @@ function parseInputObject(input: string): Record<string, unknown> | undefined {
   }
 }
 
+function applyPathAliases(
+  input: Record<string, unknown>,
+  schemaFields?: Set<string>,
+): void {
+  const pathValue = pickString(input.filePath) ?? pickString(input.path) ?? pickString(input.filepath) ?? pickString(input.file_path)
+  if (!pathValue) return
+  const target = pickPreferredPathField(schemaFields)
+  if (target) {
+    input[target] = pathValue
+    return
+  }
+  if (typeof input.filePath !== 'string') input.filePath = pathValue
+}
+
+function pickPreferredPathField(schemaFields?: Set<string>): string | undefined {
+  if (!schemaFields || schemaFields.size === 0) return undefined
+  if (schemaFields.has('filePath')) return 'filePath'
+  if (schemaFields.has('path')) return 'path'
+  if (schemaFields.has('filepath')) return 'filepath'
+  if (schemaFields.has('file_path')) return 'file_path'
+  return undefined
+}
+
+function buildToolSchemaHints(tools: LanguageModelV2CallOptions['tools']): Record<string, Set<string>> {
+  const map: Record<string, Set<string>> = {}
+  for (const tool of tools ?? []) {
+    if (!tool || typeof tool !== 'object') continue
+    const rec = tool as Record<string, unknown>
+    if (rec.type !== 'function') continue
+    const name = normalizeToolName(String(rec.name ?? ''))
+    if (!name) continue
+    const schema = rec.inputSchema
+    const fields = extractSchemaFields(schema)
+    if (fields.size > 0) map[name] = fields
+  }
+  return map
+}
+
+function extractSchemaFields(schema: unknown): Set<string> {
+  if (!schema || typeof schema !== 'object') return new Set()
+  const rec = schema as Record<string, unknown>
+  const direct = rec.properties
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
+    return new Set(Object.keys(direct as Record<string, unknown>))
+  }
+  const innerSchema = rec.schema
+  if (innerSchema && typeof innerSchema === 'object' && !Array.isArray(innerSchema)) {
+    const inner = innerSchema as Record<string, unknown>
+    if (inner.properties && typeof inner.properties === 'object' && !Array.isArray(inner.properties)) {
+      return new Set(Object.keys(inner.properties as Record<string, unknown>))
+    }
+  }
+  return new Set()
+}
+
 function normalizeToolName(name: string): string {
   const lower = name.toLowerCase()
   if (lower === 'askuserquestion') return 'question'
   if (lower === 'agent') return 'task'
   if (lower === 'exitplanmode') return 'plan_exit'
   if (lower === 'str_replace_based_edit_tool') return 'edit'
+  if (lower === 'readfile') return 'read'
+  if (lower === 'writefile') return 'write'
+  if (lower === 'runbash' || lower === 'bashcommand') return 'bash'
   if (lower.startsWith('mcp__')) {
     const withoutPrefix = lower.slice(5)
     const separatorIdx = withoutPrefix.indexOf('__')
