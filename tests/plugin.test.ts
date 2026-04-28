@@ -98,4 +98,19 @@ describe('TraeProviderPlugin', () => {
       maxPromptChars: 20000,
     })
   })
+
+  it('uses coding profile defaults when profile is not specified', async () => {
+    const hooks = await pluginModule.TraeProviderPlugin({})
+    const config = {} as Config
+    await hooks.config!(config)
+
+    expect(config.provider?.trae?.options).toMatchObject({
+      modelName: 'GLM-5.1',
+      enableToolCalling: true,
+      includeToolHistory: true,
+      enforceTextOnly: false,
+      maxPromptMessages: 60,
+      maxPromptChars: 20000,
+    })
+  })
 })

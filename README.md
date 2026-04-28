@@ -119,7 +119,7 @@ When loading the plugin programmatically, the plugin accepts:
 
 ```ts
 type TraePluginOptions = {
-  profile?: "text" | "tools"
+  profile?: "coding" | "text" | "tools"
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
@@ -136,7 +136,7 @@ type TraePluginOptions = {
 }
 ```
 
-- `profile`: quick preset. `text` = stable text-only defaults, `tools` = experimental tool-calling defaults.
+- `profile`: quick preset. default is `coding`. `coding` = coding-oriented defaults, `text` = stable text-only defaults, `tools` = experimental tool-calling defaults.
 - `cliPath`: override the `traecli` binary path.
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
 - `modelAliases`: optional alias map, e.g. `{ coding: "GLM-5.1" }`, so users can call `trae/coding`.
@@ -175,6 +175,27 @@ opencode run --model trae/default "reply with ok"
 ```
 
 Recommended local config presets:
+
+Coding default preset:
+
+```json
+{
+  "provider": {
+    "trae": {
+      "options": {
+        "profile": "coding",
+        "modelName": "GLM-5.1",
+        "enableToolCalling": true,
+        "includeToolHistory": true,
+        "enforceTextOnly": false,
+        "maxPromptMessages": 60,
+        "maxPromptChars": 20000
+      }
+    }
+  },
+  "model": "trae/coding"
+}
+```
 
 Text-only stable preset:
 
@@ -217,6 +238,7 @@ Experimental tool-calling preset:
 
 Ready-to-use config files are included:
 
+- `examples/opencode.coding.json`
 - `examples/opencode.text.json`
 - `examples/opencode.tools.json`
 

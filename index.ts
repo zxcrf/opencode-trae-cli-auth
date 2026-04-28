@@ -1,11 +1,11 @@
 import type { Hooks, Plugin } from '@opencode-ai/plugin'
 import { existsSync } from 'node:fs'
-import { TRAE_MODELS, type TraeModelDefinition } from './src/models.js'
+import { TRAE_MODELS, TRAE_MODEL_PROFILES, type TraeModelDefinition } from './src/models.js'
 import { discoverTraeModels } from './src/trae-config-models.js'
 import { resolveTraeCliPath } from './src/trae-language-model.js'
 
 type TraePluginOptions = {
-  profile?: 'text' | 'tools'
+  profile?: 'coding' | 'text' | 'tools'
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
@@ -99,6 +99,17 @@ function applyCapabilityOverrides(
 }
 
 function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
+  if (options.profile === 'coding' || !options.profile) {
+    return {
+      ...options,
+      modelName: options.modelName ?? TRAE_MODEL_PROFILES.coding,
+      enableToolCalling: options.enableToolCalling ?? true,
+      includeToolHistory: options.includeToolHistory ?? true,
+      enforceTextOnly: options.enforceTextOnly ?? false,
+      maxPromptMessages: options.maxPromptMessages ?? 60,
+      maxPromptChars: options.maxPromptChars ?? 20000,
+    }
+  }
   if (options.profile === 'tools') {
     return {
       ...options,

@@ -180,14 +180,16 @@ function emitResult(
   }
   if (parts.length > 0) controller.enqueue({ type: 'text-end', id: 'trae-0' })
   for (const call of toolCalls) {
-    controller.enqueue({ type: 'tool-input-start', id: call.id, toolName: call.name } as LanguageModelV2StreamPart)
-    controller.enqueue({ type: 'tool-input-delta', id: call.id, delta: call.input } as LanguageModelV2StreamPart)
+    const toolName = normalizeToolName(call.name)
+    const normalizedInput = normalizeToolInput(toolName, call.input)
+    controller.enqueue({ type: 'tool-input-start', id: call.id, toolName } as LanguageModelV2StreamPart)
+    controller.enqueue({ type: 'tool-input-delta', id: call.id, delta: normalizedInput } as LanguageModelV2StreamPart)
     controller.enqueue({ type: 'tool-input-end', id: call.id } as LanguageModelV2StreamPart)
     controller.enqueue({
       type: 'tool-call',
       toolCallId: call.id,
-      toolName: call.name,
-      input: call.input,
+      toolName,
+      input: normalizedInput,
     } as LanguageModelV2StreamPart)
   }
   controller.enqueue({
@@ -201,4 +203,33 @@ function resolveEnforceTextOnly(options?: TraeProviderOptions): boolean | undefi
   if (typeof options?.enforceTextOnly === 'boolean') return options.enforceTextOnly
   if (options?.enableToolCalling === true) return false
   return undefined
+}
+
+function normalizeToolInput(toolName: string, input: string): string {
+  const parsed = parseInputObject(input)
+  if (!parsed) return input
+  const normalizedToolName = toolName.toLowerCase()
+  if (normalizedToolName === 'read' || normalizedToolName === 'read_file') {
+    if (typeof parsed.filePath !== 'string') {
+      const pathValue = parsed.path ?? parsed.filepath ?? parsed.file_path
+      if (typeof pathValue === 'string' && pathValue.trim()) parsed.filePath = pathValue
+    }
+  }
+  return JSON.stringify(parsed)
+}
+
+function parseInputObject(input: string): Record<string, unknown> | undefined {
+  try {
+    const value = JSON.parse(input)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    return { ...(value as Record<string, unknown>) }
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeToolName(name: string): string {
+  const lowered = name.toLowerCase()
+  if (lowered === 'askuserquestion') return 'question'
+  return lowered
 }

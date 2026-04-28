@@ -262,7 +262,7 @@ describe('TraeLanguageModel', () => {
                   {
                     id: 'call-1',
                     type: 'function',
-                    function: { name: 'read', arguments: '{"path":"README.md"}' },
+                    function: { name: 'Read', arguments: '{"path":"README.md"}' },
                   },
                 ],
               },
@@ -282,7 +282,7 @@ describe('TraeLanguageModel', () => {
     expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
       toolCallId: 'call-1',
       toolName: 'read',
-      input: '{"path":"README.md"}',
+      input: '{"path":"README.md","filePath":"README.md"}',
     })
     expect(parts.at(-1).finishReason).toBe('tool-calls')
     const [, args] = spawnMock.mock.calls[0]
