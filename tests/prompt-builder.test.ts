@@ -16,6 +16,15 @@ describe('prompt builder', () => {
     expect(prompt).toContain('<user>\ncontinue\n</user>')
   })
 
+  it('prepends system preamble when provided', () => {
+    const prompt = buildPrompt([
+      { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+    ] as any, { systemPreamble: 'Coding runtime policy' })
+
+    expect(prompt.startsWith('<system>\nCoding runtime policy\n</system>')).toBe(true)
+    expect(prompt).toContain('<user>\nhello\n</user>')
+  })
+
   it('omits prior tool calls and tool results by default', () => {
     const prompt = buildPrompt([
       {

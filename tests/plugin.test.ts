@@ -46,6 +46,7 @@ describe('TraeProviderPlugin', () => {
       maxPromptMessages: 30,
       maxPromptChars: 16000,
       maxToolPayloadChars: 3000,
+      injectCodingSystemPrompt: false,
       enforceTextOnly: true,
       maxRetries: 2,
       retryDelayMs: 400,
@@ -70,6 +71,7 @@ describe('TraeProviderPlugin', () => {
       maxPromptMessages: 30,
       maxPromptChars: 16000,
       maxToolPayloadChars: 3000,
+      injectCodingSystemPrompt: false,
       enforceTextOnly: true,
       maxRetries: 2,
       retryDelayMs: 400,
@@ -99,6 +101,7 @@ describe('TraeProviderPlugin', () => {
       maxPromptMessages: 50,
       maxPromptChars: 20000,
       maxToolPayloadChars: 6000,
+      injectCodingSystemPrompt: true,
     })
   })
 
@@ -115,6 +118,7 @@ describe('TraeProviderPlugin', () => {
       maxPromptMessages: 60,
       maxPromptChars: 20000,
       maxToolPayloadChars: 4000,
+      injectCodingSystemPrompt: true,
     })
   })
 })

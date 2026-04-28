@@ -160,6 +160,73 @@ describe('TraeLanguageModel', () => {
     expect(args[0]).not.toContain('<tool_result')
   })
 
+  it('injects coding system preamble when tool calling is enabled', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', {
+      cliPath: '/usr/bin/traecli',
+      enableToolCalling: true,
+      enforceTextOnly: false,
+    })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      closeChild(child)
+    })
+    for await (const _ of (await streamPromise).stream as any) {}
+
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args[0]).toContain('<system>')
+    expect(args[0]).toContain('coding runtime mode')
+    expect(args[0]).toContain('<user>\nping\n</user>')
+  })
+
+  it('supports disabling coding system preamble explicitly', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', {
+      cliPath: '/usr/bin/traecli',
+      enableToolCalling: true,
+      enforceTextOnly: false,
+      injectCodingSystemPrompt: false,
+    })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      closeChild(child)
+    })
+    for await (const _ of (await streamPromise).stream as any) {}
+
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args[0]).not.toContain('coding runtime mode')
+  })
+
   it('doGenerate delegates to doStream', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()

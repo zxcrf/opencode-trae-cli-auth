@@ -5,6 +5,7 @@ type PromptBuildOptions = {
   maxChars?: number
   maxMessages?: number
   maxToolPayloadChars?: number
+  systemPreamble?: string
 }
 
 export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buildOptions?: PromptBuildOptions): string {
@@ -14,6 +15,8 @@ export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buil
 export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: PromptBuildOptions): string {
   const selectedPrompt = trimMessages(prompt, buildOptions?.maxMessages)
   const lines: string[] = []
+  const preamble = pickString(buildOptions?.systemPreamble)
+  if (preamble) lines.push(wrap('system', preamble))
   const includeToolHistory = buildOptions?.includeToolHistory === true
   for (const message of selectedPrompt) {
     lines.push(serializeMessage(message, includeToolHistory, buildOptions?.maxToolPayloadChars))
@@ -121,4 +124,8 @@ function trimMessages(prompt: LanguageModelV2Prompt, maxMessages?: number): Lang
     if (message.role === 'system' || keepNonSystem.has(i)) out.push(message)
   }
   return out
+}
+
+function pickString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined
 }

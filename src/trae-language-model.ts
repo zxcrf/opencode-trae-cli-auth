@@ -27,6 +27,8 @@ export type TraeProviderOptions = {
   maxPromptMessages?: number
   maxPromptChars?: number
   maxToolPayloadChars?: number
+  codingSystemPreamble?: string
+  injectCodingSystemPrompt?: boolean
   extraArgs?: string[]
   enforceTextOnly?: boolean
   maxRetries?: number
@@ -134,6 +136,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
               maxMessages: this.providerOptions?.maxPromptMessages ?? 40,
               maxChars: this.providerOptions?.maxPromptChars ?? 12000,
               maxToolPayloadChars: this.providerOptions?.maxToolPayloadChars,
+              systemPreamble: resolveSystemPreamble(this.providerOptions),
             }),
             queryTimeout: this.providerOptions?.queryTimeout,
             extraArgs: this.providerOptions?.extraArgs,
@@ -212,6 +215,20 @@ function resolveEnforceTextOnly(options?: TraeProviderOptions): boolean | undefi
   if (typeof options?.enforceTextOnly === 'boolean') return options.enforceTextOnly
   if (options?.enableToolCalling === true) return false
   return undefined
+}
+
+function resolveSystemPreamble(options?: TraeProviderOptions): string | undefined {
+  if (options?.injectCodingSystemPrompt === false) return undefined
+  if (typeof options?.codingSystemPreamble === 'string' && options.codingSystemPreamble.trim()) {
+    return options.codingSystemPreamble
+  }
+  if (options?.enableToolCalling !== true) return undefined
+  return [
+    'You are in coding runtime mode.',
+    'Use tools deliberately: inspect files before edits, keep edits minimal, then run verification commands.',
+    'If a tool call fails due to schema or permissions, correct arguments and retry with a safer fallback.',
+    'Do not fabricate command output; rely on tool results.',
+  ].join(' ')
 }
 
 function normalizeToolInput(

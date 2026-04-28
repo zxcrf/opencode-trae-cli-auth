@@ -129,6 +129,8 @@ type TraePluginOptions = {
   maxPromptMessages?: number
   maxPromptChars?: number
   maxToolPayloadChars?: number
+  codingSystemPreamble?: string
+  injectCodingSystemPrompt?: boolean
   enforceTextOnly?: boolean
   maxRetries?: number
   retryDelayMs?: number
@@ -147,6 +149,8 @@ type TraePluginOptions = {
 - `maxPromptMessages`: defaults to `40`; keep all `system` messages and only the most recent non-system messages.
 - `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.
 - `maxToolPayloadChars`: truncates oversized tool call inputs and tool result payloads before they are injected back into prompt history (default: `coding=4000`, `tools=6000`, `text=2000`).
+- `injectCodingSystemPrompt`: defaults by profile (`coding/tools=true`, `text=false`); injects a concise coding runtime system preamble to improve multi-turn tool use.
+- `codingSystemPreamble`: custom preamble text when `injectCodingSystemPrompt` is enabled.
 - `enforceTextOnly`: defaults to `true`; adds `--disallowed-tool` flags for common tools (`Read/Bash/Edit/Replace/Write/Glob/Grep/Task`) to keep Trae CLI in text-only behavior.
 - `maxRetries`: transient error retry count, default `1`.
 - `retryDelayMs`: delay between retries in milliseconds, default `800`.

@@ -15,6 +15,8 @@ type TraePluginOptions = {
   maxPromptMessages?: number
   maxPromptChars?: number
   maxToolPayloadChars?: number
+  codingSystemPreamble?: string
+  injectCodingSystemPrompt?: boolean
   enforceTextOnly?: boolean
   maxRetries?: number
   retryDelayMs?: number
@@ -54,6 +56,8 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(typeof effectiveOptions.maxPromptMessages === 'number' ? { maxPromptMessages: effectiveOptions.maxPromptMessages } : {}),
           ...(typeof effectiveOptions.maxPromptChars === 'number' ? { maxPromptChars: effectiveOptions.maxPromptChars } : {}),
           ...(typeof effectiveOptions.maxToolPayloadChars === 'number' ? { maxToolPayloadChars: effectiveOptions.maxToolPayloadChars } : {}),
+          ...(typeof effectiveOptions.codingSystemPreamble === 'string' ? { codingSystemPreamble: effectiveOptions.codingSystemPreamble } : {}),
+          ...(typeof effectiveOptions.injectCodingSystemPrompt === 'boolean' ? { injectCodingSystemPrompt: effectiveOptions.injectCodingSystemPrompt } : {}),
           ...(typeof effectiveOptions.enforceTextOnly === 'boolean' ? { enforceTextOnly: effectiveOptions.enforceTextOnly } : {}),
           ...(typeof effectiveOptions.maxRetries === 'number' ? { maxRetries: effectiveOptions.maxRetries } : {}),
           ...(typeof effectiveOptions.retryDelayMs === 'number' ? { retryDelayMs: effectiveOptions.retryDelayMs } : {}),
@@ -111,6 +115,7 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
       maxPromptMessages: options.maxPromptMessages ?? 60,
       maxPromptChars: options.maxPromptChars ?? 20000,
       maxToolPayloadChars: options.maxToolPayloadChars ?? 4000,
+      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? true,
     }
   }
   if (options.profile === 'tools') {
@@ -122,6 +127,7 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
       maxPromptMessages: options.maxPromptMessages ?? 50,
       maxPromptChars: options.maxPromptChars ?? 16000,
       maxToolPayloadChars: options.maxToolPayloadChars ?? 6000,
+      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? true,
     }
   }
   if (options.profile === 'text') {
@@ -133,6 +139,7 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
       maxPromptMessages: options.maxPromptMessages ?? 40,
       maxPromptChars: options.maxPromptChars ?? 12000,
       maxToolPayloadChars: options.maxToolPayloadChars ?? 2000,
+      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? false,
     }
   }
   return options
