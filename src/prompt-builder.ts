@@ -2,6 +2,7 @@ import type { LanguageModelV2CallOptions, LanguageModelV2Message, LanguageModelV
 
 type PromptBuildOptions = {
   includeToolHistory?: boolean
+  maxChars?: number
 }
 
 export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buildOptions?: PromptBuildOptions): string {
@@ -14,7 +15,8 @@ export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: Prompt
   for (const message of prompt) {
     lines.push(serializeMessage(message, includeToolHistory))
   }
-  return lines.filter(Boolean).join('\n\n') || 'Hello'
+  const text = lines.filter(Boolean).join('\n\n') || 'Hello'
+  return trimPrompt(text, buildOptions?.maxChars)
 }
 
 function serializeMessage(message: LanguageModelV2Message, includeToolHistory: boolean): string {
@@ -74,4 +76,13 @@ function serializeToolResultOutput(output: unknown): string {
   if (record.type === 'error-text' && typeof record.value === 'string') return `[Error] ${record.value}`
   if (record.type === 'error-json') return `[Error] ${JSON.stringify(record.value)}`
   return JSON.stringify(output)
+}
+
+function trimPrompt(prompt: string, maxChars?: number): string {
+  if (typeof maxChars !== 'number' || !Number.isFinite(maxChars)) return prompt
+  const limit = Math.max(256, Math.floor(maxChars))
+  if (prompt.length <= limit) return prompt
+  const suffix = prompt.slice(prompt.length - limit)
+  const truncated = prompt.length - suffix.length
+  return `[Prompt truncated: ${truncated} chars omitted]\n${suffix}`
 }

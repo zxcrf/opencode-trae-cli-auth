@@ -119,6 +119,7 @@ type TraePluginOptions = {
   modelName?: string
   queryTimeout?: number
   includeToolHistory?: boolean
+  maxPromptChars?: number
   enforceTextOnly?: boolean
   maxRetries?: number
   retryDelayMs?: number
@@ -131,6 +132,7 @@ type TraePluginOptions = {
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
 - `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
 - `includeToolHistory`: defaults to `false`; omit prior `tool-call/tool-result` history from prompt to reduce context bloat in text-only mode.
+- `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.
 - `enforceTextOnly`: defaults to `true`; adds `--disallowed-tool` flags for common tools (`Read/Bash/Edit/Replace/Write/Glob/Grep/Task`) to keep Trae CLI in text-only behavior.
 - `maxRetries`: transient error retry count, default `1`.
 - `retryDelayMs`: delay between retries in milliseconds, default `800`.

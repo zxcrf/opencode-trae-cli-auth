@@ -88,4 +88,13 @@ describe('prompt builder', () => {
 
     expect(prompt).toContain('[Unsupported file input omitted: image/png]')
   })
+
+  it('truncates oversized prompt and keeps tail content', () => {
+    const prompt = buildPrompt([
+      { role: 'user', content: [{ type: 'text', text: 'x'.repeat(1000) + 'TAIL' }] },
+    ] as any, { maxChars: 300 })
+
+    expect(prompt).toContain('[Prompt truncated:')
+    expect(prompt).toContain('TAIL')
+  })
 })

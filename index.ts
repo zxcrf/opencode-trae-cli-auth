@@ -11,6 +11,7 @@ type TraePluginOptions = {
   modelName?: string
   queryTimeout?: number
   includeToolHistory?: boolean
+  maxPromptChars?: number
   enforceTextOnly?: boolean
   maxRetries?: number
   retryDelayMs?: number
@@ -41,6 +42,7 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
           ...(options.modelName ? { modelName: options.modelName } : {}),
           ...(typeof options.queryTimeout === 'number' ? { queryTimeout: options.queryTimeout } : {}),
           ...(typeof options.includeToolHistory === 'boolean' ? { includeToolHistory: options.includeToolHistory } : {}),
+          ...(typeof options.maxPromptChars === 'number' ? { maxPromptChars: options.maxPromptChars } : {}),
           ...(typeof options.enforceTextOnly === 'boolean' ? { enforceTextOnly: options.enforceTextOnly } : {}),
           ...(typeof options.maxRetries === 'number' ? { maxRetries: options.maxRetries } : {}),
           ...(typeof options.retryDelayMs === 'number' ? { retryDelayMs: options.retryDelayMs } : {}),
