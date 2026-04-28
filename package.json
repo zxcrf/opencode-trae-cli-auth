@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "soak": "bun scripts/soak-run.mjs",
+    "overnight": "node scripts/agentic-overnight.mjs",
     "smoke:tools": "bun scripts/smoke-tool-calls.mjs",
     "prepack": "npm run build",
     "prepublishOnly": "npm run test && npm run build",

@@ -270,6 +270,21 @@ Strict mode (non-zero exit if no `tool-call` event):
 bun run smoke:tools -- --model trae/coding --strict
 ```
 
+Overnight agentic run (prompt-file driven, no built-in demo prompts):
+
+```bash
+npm run overnight -- \
+  --model trae/coding \
+  --hours 8 \
+  --concurrency 2 \
+  --timeoutMs 180000 \
+  --promptsFile /absolute/path/to/prompts.txt
+```
+
+`prompts.txt` format: one real task prompt per line, lines starting with `#` are ignored.
+Results are written to `artifacts/overnight/*.jsonl` plus a `*.summary.json`.
+`--maxRuns` is optional; omit it for true overnight runs. Use it for short verification runs.
+
 
 ## Trae CLI env helper
 
