@@ -51,25 +51,35 @@ export type TraeFunctionToolCall = {
 
 export function extractFunctionToolCalls(result: TraeCliResult): TraeFunctionToolCall[] {
   const allMessages = (result.agent_states ?? []).flatMap((state) => state.messages ?? [])
+  const lastAssistant = findLastAssistantMessage(allMessages)
+  if (!lastAssistant || !Array.isArray(lastAssistant.tool_calls)) return []
+
   const calls: TraeFunctionToolCall[] = []
-  for (const msg of allMessages) {
-    if (msg.role !== 'assistant' || !Array.isArray(msg.tool_calls)) continue
-    for (const call of msg.tool_calls) {
-      if (call?.type !== 'function') continue
-      const id = String(call.id ?? '').trim()
-      const name = String(call.function?.name ?? '').trim()
-      if (!id || !name) continue
-      calls.push({
-        id,
-        name,
-        input: normalizeJsonText(call.function?.arguments),
-      })
-    }
+  for (const call of lastAssistant.tool_calls) {
+    if (call?.type !== 'function') continue
+    const id = String(call.id ?? '').trim()
+    const name = String(call.function?.name ?? '').trim()
+    if (!id || !name) continue
+    calls.push({
+      id,
+      name,
+      input: normalizeJsonText(call.function?.arguments),
+    })
   }
 
   const deduped = new Map<string, TraeFunctionToolCall>()
   for (const call of calls) deduped.set(call.id, call)
   return [...deduped.values()]
+}
+
+function findLastAssistantMessage(
+  messages: Array<{ role?: string; tool_calls?: unknown }>,
+): { role?: string; tool_calls?: unknown } | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i]
+    if (message?.role === 'assistant') return message
+  }
+  return undefined
 }
 
 function normalizeJsonText(value: unknown): string {

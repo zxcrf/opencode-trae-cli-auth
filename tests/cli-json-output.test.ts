@@ -36,4 +36,68 @@ describe('parseLastJsonValue', () => {
       { id: 'call-1', name: 'read', input: '{"path":"README.md"}' },
     ])
   })
+
+  it('does not replay stale tool calls when final assistant turn is plain text', () => {
+    const parsed = parseLastJsonValue(JSON.stringify({
+      agent_states: [
+        {
+          messages: [
+            {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name: 'read', arguments: '{"path":"README.md"}' },
+                },
+              ],
+            },
+            {
+              role: 'assistant',
+              content: 'final answer',
+            },
+          ],
+        },
+      ],
+      message: { content: 'final answer' },
+    }))
+
+    expect(extractFunctionToolCalls(parsed)).toEqual([])
+  })
+
+  it('uses only the last assistant tool-call turn', () => {
+    const parsed = parseLastJsonValue(JSON.stringify({
+      agent_states: [
+        {
+          messages: [
+            {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: 'call-old',
+                  type: 'function',
+                  function: { name: 'read', arguments: '{"path":"README.md"}' },
+                },
+              ],
+            },
+            {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: 'call-new',
+                  type: 'function',
+                  function: { name: 'glob', arguments: '{"pattern":"src/**/*"}' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      message: { content: 'tooling' },
+    }))
+
+    expect(extractFunctionToolCalls(parsed)).toEqual([
+      { id: 'call-new', name: 'glob', input: '{"pattern":"src/**/*"}' },
+    ])
+  })
 })
