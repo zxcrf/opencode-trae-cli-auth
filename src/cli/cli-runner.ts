@@ -4,6 +4,7 @@ import { parseLastJsonValue, type TraeCliResult } from './json-output.js'
 export type CliLlmRunOptions = {
   cliPath?: string
   modelName?: string
+  sessionId?: string
   prompt: string
   queryTimeout?: number
   extraArgs?: string[]
@@ -49,6 +50,7 @@ async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
     formatDuration(args.queryTimeout ?? 120),
     ...disallowToolsArgs,
     ...(args.modelName ? ['--config', `model.name=${args.modelName}`] : []),
+    ...(args.sessionId ? ['--session-id', args.sessionId] : []),
     ...(args.extraArgs ?? []),
   ]
 

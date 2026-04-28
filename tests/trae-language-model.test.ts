@@ -70,6 +70,8 @@ describe('TraeLanguageModel', () => {
       'Task',
       '--config',
       'model.name=custom-model',
+      '--session-id',
+      'test-session',
       '--foo',
     ])
   })

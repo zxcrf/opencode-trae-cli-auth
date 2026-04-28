@@ -31,6 +31,7 @@ describe('runCliLlm', () => {
       cliPath: '/usr/bin/traecli',
       prompt: 'hello',
       modelName: 'GLM-5.1',
+      sessionId: 'sid-123',
       queryTimeout: 33,
     })
 
@@ -63,6 +64,8 @@ describe('runCliLlm', () => {
       'Task',
       '--config',
       'model.name=GLM-5.1',
+      '--session-id',
+      'sid-123',
     ])
   })
 

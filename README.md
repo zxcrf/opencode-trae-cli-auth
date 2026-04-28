@@ -155,7 +155,7 @@ type TraePluginOptions = {
 - `maxRetries`: transient error retry count, default `1`.
 - `retryDelayMs`: delay between retries in milliseconds, default `800`.
 - `extraArgs`: extra arguments appended to `traecli`.
-- `sessionId`: retained for configuration compatibility, but not used by the text-only execution path.
+- `sessionId`: forwarded to Trae CLI as `--session-id`, useful for callers that need stable Trae-side session affinity.
 
 ## Known limitations
 

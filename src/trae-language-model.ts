@@ -139,6 +139,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
               systemPreamble: resolveSystemPreamble(this.providerOptions),
             }),
             queryTimeout: this.providerOptions?.queryTimeout,
+            sessionId: this.providerOptions?.sessionId,
             extraArgs: this.providerOptions?.extraArgs,
             enforceTextOnly: resolveEnforceTextOnly(this.providerOptions),
             maxRetries: this.providerOptions?.maxRetries,
