@@ -215,6 +215,11 @@ Experimental tool-calling preset:
 }
 ```
 
+Ready-to-use config files are included:
+
+- `examples/opencode.text.json`
+- `examples/opencode.tools.json`
+
 Optional soak test (success rate + latency summary):
 
 ```bash

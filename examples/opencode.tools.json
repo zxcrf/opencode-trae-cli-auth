@@ -1,0 +1,17 @@
+{
+  "provider": {
+    "trae": {
+      "options": {
+        "profile": "tools",
+        "enableToolCalling": true,
+        "includeToolHistory": true,
+        "enforceTextOnly": false,
+        "maxPromptMessages": 50,
+        "maxPromptChars": 16000,
+        "maxRetries": 1,
+        "retryDelayMs": 800
+      }
+    }
+  },
+  "model": "trae/coding"
+}
