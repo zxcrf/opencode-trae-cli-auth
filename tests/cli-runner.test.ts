@@ -137,13 +137,50 @@ describe('runCliLlm', () => {
       queryTimeout: 1,
       maxRetries: 0,
     })
+    const rejection = expect(promise).rejects.toThrow(/timed out after 1s/)
 
     await vi.advanceTimersByTimeAsync(1000)
     stdout.end('')
     stderr.end('')
     child.emit('close', null)
 
-    await expect(promise).rejects.toThrow(/timed out after 1s/)
+    await rejection
+    expect(child.kill).toHaveBeenCalled()
+  })
+
+  it('times out even when close event is never emitted', async () => {
+    vi.useFakeTimers()
+    const { child } = makeChild()
+    spawnMock.mockReturnValue(child)
+    const { runCliLlm } = await import('../src/cli/cli-runner.js')
+    const promise = runCliLlm({
+      cliPath: '/usr/bin/traecli',
+      prompt: 'hello',
+      queryTimeout: 1,
+      maxRetries: 0,
+    })
+    const rejection = expect(promise).rejects.toThrow(/timed out after 1s/)
+
+    await vi.advanceTimersByTimeAsync(1000)
+
+    await rejection
+    expect(child.kill).toHaveBeenCalled()
+  })
+
+  it('aborts even when close event is never emitted', async () => {
+    const { child } = makeChild()
+    spawnMock.mockReturnValue(child)
+    const { runCliLlm } = await import('../src/cli/cli-runner.js')
+    const controller = new AbortController()
+    const promise = runCliLlm({
+      cliPath: '/usr/bin/traecli',
+      prompt: 'hello',
+      abortSignal: controller.signal,
+    })
+
+    controller.abort()
+
+    await expect(promise).rejects.toThrow(/aborted/)
     expect(child.kill).toHaveBeenCalled()
   })
 

@@ -62,42 +62,80 @@ async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
     env: { ...process.env },
   })
 
-  let aborted = false
-  let timedOut = false
-  const abort = () => {
-    aborted = true
-    child.kill('SIGTERM')
-    setTimeout(() => {
-      if (!child.killed) child.kill('SIGKILL')
-    }, 300).unref?.()
-  }
-  args.abortSignal?.addEventListener('abort', abort, { once: true })
   const timeoutSeconds = normalizeTimeoutSeconds(args.queryTimeout ?? 120)
-  const timeout = setTimeout(() => {
-    timedOut = true
-    child.kill()
-  }, timeoutSeconds * 1000)
-  timeout.unref?.()
+  return await new Promise<TraeCliResult>((resolve, reject) => {
+    let settled = false
+    let stdout = ''
+    let stderr = ''
+    let timeout: NodeJS.Timeout | undefined
+    let killTimer: NodeJS.Timeout | undefined
 
-  try {
-    const stdoutPromise = readStream(child.stdout)
-    const stderrPromise = readStream(child.stderr)
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      child.once('error', reject)
-      child.once('close', (code) => resolve(code))
-    })
-    const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise])
-
-    if (aborted) throw new Error('traecli request aborted')
-    if (timedOut) throw new Error(`traecli timed out after ${formatDuration(timeoutSeconds)}`)
-    if (exitCode !== 0 && !stdout.trim()) {
-      throw new Error(stderr.trim() || `traecli exited with code ${exitCode}`)
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      if (timeout) clearTimeout(timeout)
+      if (killTimer) clearTimeout(killTimer)
+      args.abortSignal?.removeEventListener('abort', onAbort)
+      child.removeListener('error', onError)
+      child.removeListener('close', onClose)
+      child.stdout?.removeListener('data', onStdoutData)
+      child.stderr?.removeListener('data', onStderrData)
+      fn()
     }
-    return parseLastJsonValue(`${stdout}\n${stderr}`)
-  } finally {
-    clearTimeout(timeout)
-    args.abortSignal?.removeEventListener('abort', abort)
-  }
+
+    const killChild = () => {
+      child.kill('SIGTERM')
+      if (killTimer) clearTimeout(killTimer)
+      killTimer = setTimeout(() => {
+        if (!child.killed) child.kill('SIGKILL')
+      }, 300)
+      killTimer.unref?.()
+    }
+
+    const onStdoutData = (chunk: string | Buffer) => {
+      stdout += String(chunk)
+    }
+    const onStderrData = (chunk: string | Buffer) => {
+      stderr += String(chunk)
+    }
+
+    const onAbort = () => {
+      killChild()
+      finish(() => reject(new Error('traecli request aborted')))
+    }
+
+    const onTimeout = () => {
+      killChild()
+      finish(() => reject(new Error(`traecli timed out after ${formatDuration(timeoutSeconds)}`)))
+    }
+
+    const onError = (error: unknown) => {
+      finish(() => reject(error instanceof Error ? error : new Error(String(error))))
+    }
+
+    const onClose = (exitCode: number | null) => {
+      finish(() => {
+        if (exitCode !== 0 && !stdout.trim()) {
+          reject(new Error(stderr.trim() || `traecli exited with code ${exitCode}`))
+          return
+        }
+        try {
+          resolve(parseLastJsonValue(`${stdout}\n${stderr}`))
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)))
+        }
+      })
+    }
+
+    child.stdout?.on('data', onStdoutData)
+    child.stderr?.on('data', onStderrData)
+    child.once('error', onError)
+    child.once('close', onClose)
+    args.abortSignal?.addEventListener('abort', onAbort, { once: true })
+
+    timeout = setTimeout(onTimeout, timeoutSeconds * 1000)
+    timeout.unref?.()
+  })
 }
 
 function shouldRetry(error: Error, attempt: number, maxRetries: number, abortSignal?: AbortSignal): boolean {
@@ -144,15 +182,4 @@ function normalizeRetryCount(count: number): number {
 
 function normalizeDelayMs(delayMs: number): number {
   return Math.max(0, Math.floor(delayMs))
-}
-
-function readStream(stream: NodeJS.ReadableStream | null): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!stream) return resolve('')
-    const chunks: string[] = []
-    stream.setEncoding('utf8')
-    stream.on('data', (chunk: string) => chunks.push(chunk))
-    stream.once('error', reject)
-    stream.once('end', () => resolve(chunks.join('')))
-  })
 }
