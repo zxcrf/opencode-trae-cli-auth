@@ -1,6 +1,6 @@
 {
   "name": "opencode-trae-cli-auth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "opencode provider plugin that proxies models through the local Trae CLI",
   "type": "module",
   "main": "dist/index.js",
