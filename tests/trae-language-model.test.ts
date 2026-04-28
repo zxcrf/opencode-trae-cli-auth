@@ -677,4 +677,137 @@ describe('TraeLanguageModel', () => {
       input: '{"filePath":"README.md","oldString":"foo","newString":"bar","replaceAll":true}',
     })
   })
+
+  it('normalizes bash aliases into command+timeout', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'run command' }] }],
+      tools: [
+        {
+          type: 'function',
+          name: 'bash',
+          description: 'Run command',
+          inputSchema: { type: 'object', properties: { command: { type: 'string' }, timeout: { type: 'number' } } },
+        },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-bash-1',
+                    type: 'function',
+                    function: { name: 'bash', arguments: '{"shell":"pwd","timeout_ms":"0"}' },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'bashing' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-bash-1',
+      toolName: 'bash',
+      input: '{"command":"pwd","timeout":1}',
+    })
+  })
+
+  it('normalizes task aliases into description/prompt/subagent_type', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'delegate task' }] }],
+      tools: [
+        {
+          type: 'function',
+          name: 'task',
+          description: 'Delegate work',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              description: { type: 'string' },
+              prompt: { type: 'string' },
+              subagent_type: { type: 'string' },
+            },
+          },
+        },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-task-1',
+                    type: 'function',
+                    function: {
+                      name: 'Task',
+                      arguments: '{"title":"Explore auth","instruction":"Inspect scheduler","agentType":"explore"}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: 'delegating' },
+      }))
+      stderr.end('')
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    const toolCall = parts.find((p) => p.type === 'tool-call')
+    expect(toolCall).toMatchObject({
+      toolCallId: 'call-task-1',
+      toolName: 'task',
+    })
+    expect(JSON.parse((toolCall as any).input)).toEqual({
+      subagent_type: 'explorer',
+      description: 'Explore auth',
+      prompt: 'Inspect scheduler',
+    })
+  })
 })

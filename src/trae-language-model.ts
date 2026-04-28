@@ -354,10 +354,19 @@ function normalizeToolInputObject(toolName: string, input: Record<string, unknow
     case 'bash': {
       const next = renameKeys(input, {})
       if (!pickString(next.command)) {
-        next.command = pickString(next.cmd) ?? pickString(next.script) ?? ''
+        next.command = pickString(next.cmd) ?? pickString(next.script) ?? pickString(next.shell) ?? ''
+      }
+      const timeout = pickNumber(next.timeout)
+        ?? pickNumber(next.timeoutMs)
+        ?? pickNumber(next.timeout_ms)
+      if (timeout !== undefined) {
+        next.timeout = normalizeMinInt(timeout, 1)
       }
       delete next.cmd
       delete next.script
+      delete next.shell
+      delete next.timeoutMs
+      delete next.timeout_ms
       return next
     }
     case 'question': {
@@ -376,7 +385,23 @@ function normalizeToolInputObject(toolName: string, input: Record<string, unknow
     case 'task': {
       const next = renameKeys(input, {})
       const subagentType = pickString(next.subagent_type)
+        ?? pickString(next.subagentType)
+        ?? pickString(next.agent_type)
+        ?? pickString(next.agentType)
+        ?? pickString(next.type)
       if (subagentType) next.subagent_type = mapSubagentType(subagentType)
+      const description = pickString(next.description) ?? pickString(next.title) ?? pickString(next.name)
+      if (description !== undefined) next.description = description
+      const prompt = pickString(next.prompt) ?? pickString(next.task) ?? pickString(next.instruction)
+      if (prompt !== undefined) next.prompt = prompt
+      delete next.subagentType
+      delete next.agent_type
+      delete next.agentType
+      delete next.type
+      delete next.title
+      delete next.name
+      delete next.task
+      delete next.instruction
       return next
     }
     default:
