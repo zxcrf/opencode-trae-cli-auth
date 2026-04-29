@@ -29,7 +29,7 @@ describe('parseLastJsonValue', () => {
           ],
         },
       ],
-      message: { content: 'ok' },
+      message: { content: '' },
     }))
 
     expect(extractFunctionToolCalls(parsed)).toEqual([
@@ -65,6 +65,35 @@ describe('parseLastJsonValue', () => {
     expect(extractFunctionToolCalls(parsed)).toEqual([])
   })
 
+  it('does not replay agent_state tool calls when top-level message is final text', () => {
+    const parsed = parseLastJsonValue(JSON.stringify({
+      agent_states: [
+        {
+          messages: [
+            {
+              role: 'assistant',
+              content: '',
+              tool_calls: [
+                {
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name: 'read', arguments: '{"path":"README.md"}' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      message: {
+        role: 'assistant',
+        content: 'final answer',
+        response_meta: { finish_reason: 'stop' },
+      },
+    }))
+
+    expect(extractFunctionToolCalls(parsed)).toEqual([])
+  })
+
   it('uses only the last assistant tool-call turn', () => {
     const parsed = parseLastJsonValue(JSON.stringify({
       agent_states: [
@@ -93,7 +122,7 @@ describe('parseLastJsonValue', () => {
           ],
         },
       ],
-      message: { content: 'tooling' },
+      message: { content: '' },
     }))
 
     expect(extractFunctionToolCalls(parsed)).toEqual([

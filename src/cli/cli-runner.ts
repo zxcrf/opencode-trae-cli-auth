@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { parseLastJsonValue, type TraeCliResult } from './json-output.js'
+import { parseJsonValues, parseLastJsonValue, type TraeCliResult } from './json-output.js'
 
 export type CliLlmRunOptions = {
   cliPath?: string
@@ -13,6 +13,8 @@ export type CliLlmRunOptions = {
   retryDelayMs?: number
   abortSignal?: AbortSignal
 }
+
+export type CliLlmStreamAction = 'continue' | 'stop'
 
 const DEFAULT_DISALLOWED_TOOLS = ['Read', 'Bash', 'Edit', 'Replace', 'Write', 'Glob', 'Grep', 'Task'] as const
 
@@ -38,7 +40,46 @@ export async function runCliLlm(args: CliLlmRunOptions): Promise<TraeCliResult> 
   throw lastError ?? new Error('traecli request failed')
 }
 
+export async function runCliLlmStreaming(
+  args: CliLlmRunOptions,
+  onResult: (result: TraeCliResult) => CliLlmStreamAction | void,
+): Promise<TraeCliResult> {
+  if (!args.cliPath) {
+    throw new Error('traecli binary not found. Install traecli and ensure it is on PATH.')
+  }
+
+  const maxRetries = normalizeRetryCount(args.maxRetries ?? 1)
+  const retryDelayMs = normalizeDelayMs(args.retryDelayMs ?? 800)
+  let lastError: Error | undefined
+  let emitted = false
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await runStreamingOnce(args, (result) => {
+        emitted = true
+        return onResult(result)
+      })
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      if (emitted || !shouldRetry(lastError, attempt, maxRetries, args.abortSignal)) throw lastError
+      await waitWithAbort(retryDelayMs, args.abortSignal)
+    }
+  }
+
+  throw lastError ?? new Error('traecli request failed')
+}
+
 async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
+  let lastResult: TraeCliResult | undefined
+  return runStreamingOnce(args, (result) => {
+    lastResult = result
+  }).then((result) => result ?? lastResult ?? parseLastJsonValue(''))
+}
+
+async function runStreamingOnce(
+  args: CliLlmRunOptions,
+  onResult: (result: TraeCliResult) => CliLlmStreamAction | void,
+): Promise<TraeCliResult> {
   if (args.abortSignal?.aborted) {
     throw new Error('traecli request aborted')
   }
@@ -67,6 +108,8 @@ async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
     let settled = false
     let stdout = ''
     let stderr = ''
+    let stdoutPending = ''
+    let lastResult: TraeCliResult | undefined
     let timeout: NodeJS.Timeout | undefined
     let killTimer: NodeJS.Timeout | undefined
 
@@ -93,7 +136,19 @@ async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
     }
 
     const onStdoutData = (chunk: string | Buffer) => {
-      stdout += String(chunk)
+      const text = String(chunk)
+      stdout += text
+      stdoutPending += text
+      const parsed = parseJsonValues(stdoutPending)
+      stdoutPending = parsed.rest
+      for (const result of parsed.values) {
+        lastResult = result
+        if (onResult(result) === 'stop') {
+          killChild()
+          finish(() => resolve(result))
+          return
+        }
+      }
     }
     const onStderrData = (chunk: string | Buffer) => {
       stderr += String(chunk)
@@ -120,7 +175,8 @@ async function runOnce(args: CliLlmRunOptions): Promise<TraeCliResult> {
           return
         }
         try {
-          resolve(parseLastJsonValue(`${stdout}\n${stderr}`))
+          const result = lastResult ?? parseLastJsonValue(`${stdout}\n${stderr}`)
+          resolve(result)
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)))
         }

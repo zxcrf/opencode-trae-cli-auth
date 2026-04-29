@@ -338,7 +338,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'tooling' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -356,6 +356,60 @@ describe('TraeLanguageModel', () => {
     expect(parts.at(-1).finishReason).toBe('tool-calls')
     const [, args] = spawnMock.mock.calls[0]
     expect(args).not.toContain('--disallowed-tool')
+  })
+
+  it('emits tool-call finish before the Trae process closes', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', { cliPath: '/usr/bin/traecli', enableToolCalling: true })
+    const { stream } = await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'read file' }] }],
+    } as any)
+    const reader = stream.getReader()
+
+    const first = await reader.read()
+    expect(first.value?.type).toBe('stream-start')
+
+    stdout.write(JSON.stringify({
+      agent_states: [
+        {
+          messages: [
+            {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: 'call-stream-1',
+                  type: 'function',
+                  function: { name: 'Read', arguments: '{"path":"README.md"}' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      message: { content: '' },
+    }))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const parts: any[] = []
+    while (parts.at(-1)?.type !== 'finish') {
+      const next = await reader.read()
+      expect(next.done).toBe(false)
+      parts.push(next.value)
+    }
+
+    expect(parts.map((p) => p.type)).toContain('tool-call')
+    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'tool-calls' })
+    expect(child.kill).toHaveBeenCalled()
   })
 
   it('normalizes edit tool name and snake_case args for tool-call payloads', async () => {
@@ -396,7 +450,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'editing' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -465,7 +519,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'reading' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -532,7 +586,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'listing' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -600,7 +654,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'searching' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -659,7 +713,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'writing' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -729,7 +783,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'editing alias' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -788,7 +842,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'bashing' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)
@@ -857,7 +911,7 @@ describe('TraeLanguageModel', () => {
             ],
           },
         ],
-        message: { content: 'delegating' },
+        message: { content: '' },
       }))
       stderr.end('')
       closeChild(child)

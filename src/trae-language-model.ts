@@ -14,7 +14,7 @@ import { buildPromptFromOptions } from './prompt-builder.js'
 import { extractFunctionToolCalls, type TraeCliResult } from './cli/json-output.js'
 import { contentToText } from './cli/text-content.js'
 import { mapUsage } from './cli/usage.js'
-import { runCliLlm } from './cli/cli-runner.js'
+import { runCliLlmStreaming } from './cli/cli-runner.js'
 import { TRAE_MODEL_PROFILES } from './models.js'
 
 export type TraeProviderOptions = {
@@ -126,9 +126,13 @@ export class TraeLanguageModel implements LanguageModelV2 {
     const stream = new ReadableStream<LanguageModelV2StreamPart>({
       start: async (controller) => {
         controller.enqueue({ type: 'stream-start', warnings: [] })
+        let textStarted = false
+        let emittedText = ''
+        let finished = false
+        let lastUsage: LanguageModelV2Usage | undefined
         try {
           const selectedModel = resolveTraeModelName(this.modelId, this.providerOptions)
-          const result = await runCliLlm({
+          const result = await runCliLlmStreaming({
             cliPath,
             modelName: selectedModel,
             prompt: buildPromptFromOptions(options, {
@@ -145,13 +149,50 @@ export class TraeLanguageModel implements LanguageModelV2 {
             maxRetries: this.providerOptions?.maxRetries,
             retryDelayMs: this.providerOptions?.retryDelayMs,
             abortSignal: options.abortSignal,
+          }, (chunk) => {
+            lastUsage = mapUsage(chunk.usage ?? chunk.message?.response_meta?.usage)
+            const toolCalls = this.providerOptions?.enableToolCalling === true ? extractFunctionToolCalls(chunk) : []
+            if (toolCalls.length > 0) {
+              if (textStarted) controller.enqueue({ type: 'text-end', id: 'trae-0' })
+              emitToolCalls(controller, toolCalls, toolSchemaHints)
+              controller.enqueue({
+                type: 'finish',
+                finishReason: decorateFinishReason('tool-calls'),
+                usage: lastUsage,
+              })
+              finished = true
+              return 'stop'
+            }
+
+            const text = contentToText(chunk.message?.content).join('')
+            const delta = nextTextDelta(emittedText, text)
+            if (delta) {
+              if (!textStarted) {
+                controller.enqueue({ type: 'text-start', id: 'trae-0' })
+                textStarted = true
+              }
+              controller.enqueue({ type: 'text-delta', id: 'trae-0', delta })
+              emittedText = text
+            }
           })
-          emitResult(
-            controller,
-            result,
-            this.providerOptions?.enableToolCalling === true,
-            toolSchemaHints,
-          )
+          if (!finished) {
+            const text = contentToText(result.message?.content).join('')
+            const delta = nextTextDelta(emittedText, text)
+            if (delta) {
+              if (!textStarted) {
+                controller.enqueue({ type: 'text-start', id: 'trae-0' })
+                textStarted = true
+              }
+              controller.enqueue({ type: 'text-delta', id: 'trae-0', delta })
+              emittedText = text
+            }
+            if (textStarted) controller.enqueue({ type: 'text-end', id: 'trae-0' })
+            controller.enqueue({
+              type: 'finish',
+              finishReason: decorateFinishReason('stop'),
+              usage: lastUsage ?? mapUsage(result.usage ?? result.message?.response_meta?.usage),
+            })
+          }
         } catch (error) {
           controller.enqueue({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) })
           controller.enqueue({
@@ -192,6 +233,25 @@ function emitResult(
     controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: part })
   }
   if (parts.length > 0) controller.enqueue({ type: 'text-end', id: 'trae-0' })
+  emitToolCalls(controller, toolCalls, toolSchemaHints)
+  controller.enqueue({
+    type: 'finish',
+    finishReason: decorateFinishReason(toolCalls.length > 0 ? 'tool-calls' : 'stop'),
+    usage: mapUsage(result.usage ?? result.message?.response_meta?.usage),
+  })
+}
+
+function nextTextDelta(previous: string, next: string): string {
+  if (!next) return ''
+  if (next.startsWith(previous)) return next.slice(previous.length)
+  return next
+}
+
+function emitToolCalls(
+  controller: ReadableStreamDefaultController<LanguageModelV2StreamPart>,
+  toolCalls: ReturnType<typeof extractFunctionToolCalls>,
+  toolSchemaHints: Record<string, Set<string>>,
+): void {
   for (const call of toolCalls) {
     const toolName = normalizeToolName(call.name)
     const normalizedInput = normalizeToolInput(toolName, call.input, toolSchemaHints[toolName])
@@ -205,11 +265,6 @@ function emitResult(
       input: normalizedInput,
     } as LanguageModelV2StreamPart)
   }
-  controller.enqueue({
-    type: 'finish',
-    finishReason: decorateFinishReason(toolCalls.length > 0 ? 'tool-calls' : 'stop'),
-    usage: mapUsage(result.usage ?? result.message?.response_meta?.usage),
-  })
 }
 
 function resolveEnforceTextOnly(options?: TraeProviderOptions): boolean | undefined {

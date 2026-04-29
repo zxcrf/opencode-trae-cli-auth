@@ -13,8 +13,10 @@ export type TraeCliResult = {
     }>
   }>
   message?: {
+    role?: string
     content?: unknown
     response_meta?: {
+      finish_reason?: string
       usage?: Record<string, unknown>
     }
   }
@@ -43,6 +45,29 @@ export function parseLastJsonValue(text: string): TraeCliResult {
   throw new Error(`Unable to parse traecli JSON output: ${trimmed.slice(0, 240)}`)
 }
 
+export function parseJsonValues(text: string): { values: TraeCliResult[]; rest: string } {
+  const values: TraeCliResult[] = []
+  let cursor = 0
+
+  while (cursor < text.length) {
+    const start = findNextJsonStart(text, cursor)
+    if (start < 0) return { values, rest: '' }
+    const candidate = text.slice(start)
+    const end = findJsonEnd(candidate)
+    if (end < 0) return { values, rest: candidate }
+
+    try {
+      const parsed = JSON.parse(candidate.slice(0, end)) as TraeCliResult
+      if (parsed && typeof parsed === 'object') values.push(parsed)
+      cursor = start + end
+    } catch {
+      cursor = start + 1
+    }
+  }
+
+  return { values, rest: '' }
+}
+
 export type TraeFunctionToolCall = {
   id: string
   name: string
@@ -50,6 +75,7 @@ export type TraeFunctionToolCall = {
 }
 
 export function extractFunctionToolCalls(result: TraeCliResult): TraeFunctionToolCall[] {
+  if (hasFinalTopLevelText(result)) return []
   const allMessages = (result.agent_states ?? []).flatMap((state) => state.messages ?? [])
   const lastAssistant = findLastAssistantMessage(allMessages)
   if (!lastAssistant || !Array.isArray(lastAssistant.tool_calls)) return []
@@ -72,6 +98,23 @@ export function extractFunctionToolCalls(result: TraeCliResult): TraeFunctionToo
   return [...deduped.values()]
 }
 
+function hasFinalTopLevelText(result: TraeCliResult): boolean {
+  const finishReason = result.message?.response_meta?.finish_reason
+  if (finishReason && finishReason !== 'stop') return false
+  return hasTextContent(result.message?.content)
+}
+
+function hasTextContent(content: unknown): boolean {
+  if (typeof content === 'string') return content.trim().length > 0
+  if (!Array.isArray(content)) return false
+  return content.some((part) => {
+    if (typeof part === 'string') return part.trim().length > 0
+    if (!part || typeof part !== 'object') return false
+    const record = part as Record<string, unknown>
+    return record.type === 'text' && typeof record.text === 'string' && record.text.trim().length > 0
+  })
+}
+
 function findLastAssistantMessage(
   messages: Array<{ role?: string; tool_calls?: unknown }>,
 ): { role?: string; tool_calls?: unknown } | undefined {
@@ -85,6 +128,14 @@ function findLastAssistantMessage(
 function normalizeJsonText(value: unknown): string {
   if (typeof value === 'string' && value.trim()) return value
   return '{}'
+}
+
+function findNextJsonStart(text: string, offset: number): number {
+  const objectStart = text.indexOf('{', offset)
+  const arrayStart = text.indexOf('[', offset)
+  if (objectStart < 0) return arrayStart
+  if (arrayStart < 0) return objectStart
+  return Math.min(objectStart, arrayStart)
 }
 
 function findJsonEnd(text: string): number {

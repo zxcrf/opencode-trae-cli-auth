@@ -93,6 +93,31 @@ describe('runCliLlm', () => {
     ])
   })
 
+  it('streams parsed json values before the process closes', async () => {
+    const { child, stdout, stderr } = makeChild()
+    spawnMock.mockReturnValue(child)
+    const { runCliLlmStreaming } = await import('../src/cli/cli-runner.js')
+    const seen: unknown[] = []
+    const promise = runCliLlmStreaming({
+      cliPath: '/usr/bin/traecli',
+      prompt: 'hello',
+      maxRetries: 0,
+    }, (result) => {
+      seen.push(result)
+    })
+
+    stdout.write('noise\n{"message":{"content":"partial"}}\n')
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(seen).toEqual([{ message: { content: 'partial' } }])
+
+    stdout.end('{"message":{"content":"final"}}')
+    stderr.end('')
+    child.emit('close', 0)
+
+    await expect(promise).resolves.toMatchObject({ message: { content: 'final' } })
+  })
+
   it('kills the process on abort', async () => {
     const { child, stdout, stderr } = makeChild()
     spawnMock.mockReturnValue(child)
