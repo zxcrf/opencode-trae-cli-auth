@@ -129,6 +129,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
         let textStarted = false
         let emittedText = ''
         let finished = false
+        let metadataEmitted = false
         let lastUsage: LanguageModelV2Usage | undefined
         try {
           const selectedModel = resolveTraeModelName(this.modelId, this.providerOptions)
@@ -150,6 +151,13 @@ export class TraeLanguageModel implements LanguageModelV2 {
             retryDelayMs: this.providerOptions?.retryDelayMs,
             abortSignal: options.abortSignal,
           }, (chunk) => {
+            if (!metadataEmitted) {
+              controller.enqueue({
+                type: 'response-metadata',
+                modelId: selectedModel ?? this.modelId,
+              })
+              metadataEmitted = true
+            }
             lastUsage = mapUsage(chunk.usage ?? chunk.message?.response_meta?.usage)
             const toolCalls = this.providerOptions?.enableToolCalling === true ? extractFunctionToolCalls(chunk) : []
             if (toolCalls.length > 0) {
@@ -176,6 +184,13 @@ export class TraeLanguageModel implements LanguageModelV2 {
             }
           })
           if (!finished) {
+            if (!metadataEmitted) {
+              controller.enqueue({
+                type: 'response-metadata',
+                modelId: selectedModel ?? this.modelId,
+              })
+              metadataEmitted = true
+            }
             const text = contentToText(result.message?.content).join('')
             const delta = nextTextDelta(emittedText, text)
             if (delta) {
@@ -255,7 +270,7 @@ function emitToolCalls(
   for (const call of toolCalls) {
     const toolName = normalizeToolName(call.name)
     const normalizedInput = normalizeToolInput(toolName, call.input, toolSchemaHints[toolName])
-    controller.enqueue({ type: 'tool-input-start', id: call.id, toolName } as LanguageModelV2StreamPart)
+    controller.enqueue({ type: 'tool-input-start', id: call.id, toolName, providerExecuted: false } as LanguageModelV2StreamPart)
     controller.enqueue({ type: 'tool-input-delta', id: call.id, delta: normalizedInput } as LanguageModelV2StreamPart)
     controller.enqueue({ type: 'tool-input-end', id: call.id } as LanguageModelV2StreamPart)
     controller.enqueue({
@@ -263,6 +278,7 @@ function emitToolCalls(
       toolCallId: call.id,
       toolName,
       input: normalizedInput,
+      providerExecuted: false,
     } as LanguageModelV2StreamPart)
   }
 }

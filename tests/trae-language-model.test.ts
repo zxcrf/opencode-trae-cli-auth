@@ -43,6 +43,7 @@ describe('TraeLanguageModel', () => {
 
     const deltas = parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')
     expect(deltas).toBe('hello world')
+    expect(parts.find((p) => p.type === 'response-metadata')).toMatchObject({ modelId: 'custom-model' })
     const finish = parts.find((p) => p.type === 'finish')
     expect(finish.usage).toMatchObject({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
     const [, args] = spawnMock.mock.calls[0]
@@ -281,6 +282,7 @@ describe('TraeLanguageModel', () => {
 
     expect(parts.map((p) => p.type)).toEqual([
       'stream-start',
+      'response-metadata',
       'text-start',
       'text-delta',
       'text-end',
@@ -408,6 +410,8 @@ describe('TraeLanguageModel', () => {
     }
 
     expect(parts.map((p) => p.type)).toContain('tool-call')
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({ providerExecuted: false })
+    expect(parts.find((p) => p.type === 'tool-input-start')).toMatchObject({ providerExecuted: false })
     expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'tool-calls' })
     expect(child.kill).toHaveBeenCalled()
   })
