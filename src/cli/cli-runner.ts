@@ -26,12 +26,19 @@ export async function runCliLlm(args: CliLlmRunOptions): Promise<TraeCliResult> 
   const maxRetries = normalizeRetryCount(args.maxRetries ?? 1)
   const retryDelayMs = normalizeDelayMs(args.retryDelayMs ?? 800)
   let lastError: Error | undefined
+  let allowModelFallback = true
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await runOnce(args)
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
+      if (allowModelFallback && shouldRetryWithoutModelConfig(lastError, args)) {
+        allowModelFallback = false
+        args = { ...args, modelName: undefined }
+        attempt -= 1
+        continue
+      }
       if (!shouldRetry(lastError, attempt, maxRetries, args.abortSignal)) throw lastError
       await waitWithAbort(retryDelayMs, args.abortSignal)
     }
@@ -52,6 +59,7 @@ export async function runCliLlmStreaming(
   const retryDelayMs = normalizeDelayMs(args.retryDelayMs ?? 800)
   let lastError: Error | undefined
   let emitted = false
+  let allowModelFallback = true
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -61,6 +69,12 @@ export async function runCliLlmStreaming(
       })
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
+      if (allowModelFallback && !emitted && shouldRetryWithoutModelConfig(lastError, args)) {
+        allowModelFallback = false
+        args = { ...args, modelName: undefined }
+        attempt -= 1
+        continue
+      }
       if (emitted || !shouldRetry(lastError, attempt, maxRetries, args.abortSignal)) throw lastError
       await waitWithAbort(retryDelayMs, args.abortSignal)
     }
@@ -90,8 +104,6 @@ async function runStreamingOnce(
     args.prompt,
     '-p',
     '--json',
-    '--query-timeout',
-    formatDuration(args.queryTimeout ?? 120),
     ...disallowToolsArgs,
     ...(args.modelName ? ['--config', `model.name=${args.modelName}`] : []),
     ...(args.sessionId ? ['--session-id', args.sessionId] : []),
@@ -206,6 +218,12 @@ function shouldRetry(error: Error, attempt: number, maxRetries: number, abortSig
     msg.includes('socket hang up') ||
     msg.includes('connection reset')
   )
+}
+
+function shouldRetryWithoutModelConfig(error: Error, args: CliLlmRunOptions): boolean {
+  if (!args.modelName) return false
+  const msg = error.message.toLowerCase()
+  return msg.includes('realname') || msg.includes('nil pointer dereference') || msg.includes('segmentation violation')
 }
 
 function waitWithAbort(ms: number, abortSignal?: AbortSignal): Promise<void> {

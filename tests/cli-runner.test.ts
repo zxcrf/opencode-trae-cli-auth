@@ -44,8 +44,6 @@ describe('runCliLlm', () => {
       'hello',
       '-p',
       '--json',
-      '--query-timeout',
-      '33s',
       '--disallowed-tool',
       'Read',
       '--disallowed-tool',
@@ -88,8 +86,6 @@ describe('runCliLlm', () => {
       'hello',
       '-p',
       '--json',
-      '--query-timeout',
-      '120s',
     ])
   })
 
@@ -235,5 +231,37 @@ describe('runCliLlm', () => {
 
     await expect(promise).rejects.toThrow(/tenantsecurity/i)
     expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries once without model config when traecli crashes in RealName path', async () => {
+    const first = makeChild()
+    const second = makeChild()
+    spawnMock
+      .mockImplementationOnce(() => first.child)
+      .mockImplementationOnce(() => {
+        setImmediate(() => {
+          second.stdout.end('{"message":{"content":"ok"}}')
+          second.stderr.end('')
+          second.child.emit('close', 0)
+        })
+        return second.child
+      })
+
+    const { runCliLlm } = await import('../src/cli/cli-runner.js')
+    const promise = runCliLlm({
+      cliPath: '/usr/bin/traecli',
+      prompt: 'hello',
+      modelName: 'GLM-5.1',
+      maxRetries: 0,
+    })
+
+    first.stdout.end('')
+    first.stderr.end('panic: runtime error: invalid memory address or nil pointer dereference\nconf.(*Model).RealName')
+    first.child.emit('close', 2)
+
+    await expect(promise).resolves.toMatchObject({ message: { content: 'ok' } })
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    expect(spawnMock.mock.calls[0][1]).toContain('model.name=GLM-5.1')
+    expect(spawnMock.mock.calls[1][1]).not.toContain('model.name=GLM-5.1')
   })
 })

@@ -16,7 +16,7 @@ export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: Prompt
   const selectedPrompt = trimMessages(prompt, buildOptions?.maxMessages)
   const lines: string[] = []
   const preamble = pickString(buildOptions?.systemPreamble)
-  if (preamble) lines.push(wrap('system', preamble))
+  if (preamble) lines.push(formatBlock('System', preamble))
   const includeToolHistory = buildOptions?.includeToolHistory === true
   for (const message of selectedPrompt) {
     lines.push(serializeMessage(message, includeToolHistory, buildOptions?.maxToolPayloadChars))
@@ -32,14 +32,14 @@ function serializeMessage(
 ): string {
   switch (message.role) {
     case 'system':
-      return typeof message.content === 'string' ? wrap('system', message.content) : ''
+      return typeof message.content === 'string' ? formatBlock('System', message.content) : ''
     case 'user':
       return Array.isArray(message.content)
-        ? wrap('user', message.content.map((part) => serializePart(part, includeToolHistory, maxToolPayloadChars)).filter(Boolean).join('\n'))
+        ? formatBlock('User', message.content.map((part) => serializePart(part, includeToolHistory, maxToolPayloadChars)).filter(Boolean).join('\n'))
         : ''
     case 'assistant':
       return Array.isArray(message.content)
-        ? wrap('assistant', message.content.map((part) => serializePart(part, includeToolHistory, maxToolPayloadChars)).filter(Boolean).join('\n'))
+        ? formatBlock('Assistant', message.content.map((part) => serializePart(part, includeToolHistory, maxToolPayloadChars)).filter(Boolean).join('\n'))
         : ''
     case 'tool':
       return includeToolHistory && Array.isArray(message.content)
@@ -50,8 +50,8 @@ function serializeMessage(
   }
 }
 
-function wrap(tag: string, value: string): string {
-  return value.trim() ? `<${tag}>\n${value}\n</${tag}>` : ''
+function formatBlock(label: string, value: string): string {
+  return value.trim() ? `${label}:\n${value}` : ''
 }
 
 function serializePart(part: unknown, includeToolHistory: boolean, maxToolPayloadChars?: number): string {
@@ -61,7 +61,7 @@ function serializePart(part: unknown, includeToolHistory: boolean, maxToolPayloa
   if (includeToolHistory && record.type === 'tool-call') {
     const inputRaw = typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {})
     const input = trimToolPayload(inputRaw, maxToolPayloadChars, 'tool_call input')
-    return `<tool_call id="${String(record.toolCallId)}" name="${String(record.toolName)}">\n${input}\n</tool_call>`
+    return `Tool call [${String(record.toolCallId)}] ${String(record.toolName)}:\n${input}`
   }
   if (record.type === 'file') {
     return `[Unsupported file input omitted: ${String(record.mediaType ?? 'unknown')}]`
@@ -77,7 +77,7 @@ function serializeToolResultPart(part: unknown, maxToolPayloadChars?: number): s
   const record = part as Record<string, unknown>
   if (record.type !== 'tool-result') return ''
   const output = trimToolPayload(serializeToolResultOutput(record.output), maxToolPayloadChars, 'tool_result output')
-  return `<tool_result id="${String(record.toolCallId)}" name="${String(record.toolName)}">\n${output}\n</tool_result>`
+  return `Tool result [${String(record.toolCallId)}] ${String(record.toolName)}:\n${output}`
 }
 
 function serializeToolResultOutput(output: unknown): string {

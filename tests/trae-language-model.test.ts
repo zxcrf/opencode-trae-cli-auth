@@ -48,11 +48,9 @@ describe('TraeLanguageModel', () => {
     expect(finish.usage).toMatchObject({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
     const [, args] = spawnMock.mock.calls[0]
     expect(args).toEqual([
-      '<user>\nping\n</user>',
+      'User:\nping',
       '-p',
       '--json',
-      '--query-timeout',
-      '55s',
       '--disallowed-tool',
       'Read',
       '--disallowed-tool',
@@ -192,9 +190,9 @@ describe('TraeLanguageModel', () => {
     for await (const _ of (await streamPromise).stream as any) {}
 
     const [, args] = spawnMock.mock.calls[0]
-    expect(args[0]).toContain('<system>')
+    expect(args[0]).toContain('System:')
     expect(args[0]).toContain('coding runtime mode')
-    expect(args[0]).toContain('<user>\nping\n</user>')
+    expect(args[0]).toContain('User:\nping')
   })
 
   it('supports disabling coding system preamble explicitly', async () => {

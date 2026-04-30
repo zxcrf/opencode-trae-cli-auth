@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildPrompt } from '../src/prompt-builder.js'
 
 describe('prompt builder', () => {
-  it('serializes multi-turn text history with role tags', () => {
+  it('serializes multi-turn text history as plain transcript blocks', () => {
     const prompt = buildPrompt([
       { role: 'system', content: 'Be concise.' },
       { role: 'user', content: [{ type: 'text', text: 'hello' }] },
@@ -10,10 +10,10 @@ describe('prompt builder', () => {
       { role: 'user', content: [{ type: 'text', text: 'continue' }] },
     ] as any)
 
-    expect(prompt).toContain('<system>\nBe concise.\n</system>')
-    expect(prompt).toContain('<user>\nhello\n</user>')
-    expect(prompt).toContain('<assistant>\nhi\n</assistant>')
-    expect(prompt).toContain('<user>\ncontinue\n</user>')
+    expect(prompt).toContain('System:\nBe concise.')
+    expect(prompt).toContain('User:\nhello')
+    expect(prompt).toContain('Assistant:\nhi')
+    expect(prompt).toContain('User:\ncontinue')
   })
 
   it('prepends system preamble when provided', () => {
@@ -21,8 +21,8 @@ describe('prompt builder', () => {
       { role: 'user', content: [{ type: 'text', text: 'hello' }] },
     ] as any, { systemPreamble: 'Coding runtime policy' })
 
-    expect(prompt.startsWith('<system>\nCoding runtime policy\n</system>')).toBe(true)
-    expect(prompt).toContain('<user>\nhello\n</user>')
+    expect(prompt.startsWith('System:\nCoding runtime policy')).toBe(true)
+    expect(prompt).toContain('User:\nhello')
   })
 
   it('omits prior tool calls and tool results by default', () => {
@@ -51,8 +51,8 @@ describe('prompt builder', () => {
       },
     ] as any)
 
-    expect(prompt).not.toContain('<tool_call id="call-1" name="read">')
-    expect(prompt).not.toContain('<tool_result id="call-1" name="read">')
+    expect(prompt).not.toContain('Tool call [call-1] read:')
+    expect(prompt).not.toContain('Tool result [call-1] read:')
   })
 
   it('can preserve prior tool calls and tool results when enabled', () => {
@@ -81,9 +81,9 @@ describe('prompt builder', () => {
       },
     ] as any, { includeToolHistory: true })
 
-    expect(prompt).toContain('<tool_call id="call-1" name="read">')
+    expect(prompt).toContain('Tool call [call-1] read:')
     expect(prompt).toContain('"filePath":"README.md"')
-    expect(prompt).toContain('<tool_result id="call-1" name="read">')
+    expect(prompt).toContain('Tool result [call-1] read:')
     expect(prompt).toContain('contents')
   })
 
@@ -146,10 +146,10 @@ describe('prompt builder', () => {
       { role: 'assistant', content: [{ type: 'text', text: 'a2' }] },
     ] as any, { maxMessages: 2 })
 
-    expect(prompt).toContain('<system>\nAlways concise.\n</system>')
-    expect(prompt).not.toContain('<user>\nu1\n</user>')
-    expect(prompt).not.toContain('<assistant>\na1\n</assistant>')
-    expect(prompt).toContain('<user>\nu2\n</user>')
-    expect(prompt).toContain('<assistant>\na2\n</assistant>')
+    expect(prompt).toContain('System:\nAlways concise.')
+    expect(prompt).not.toContain('User:\nu1')
+    expect(prompt).not.toContain('Assistant:\na1')
+    expect(prompt).toContain('User:\nu2')
+    expect(prompt).toContain('Assistant:\na2')
   })
 })
