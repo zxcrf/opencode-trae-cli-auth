@@ -226,13 +226,19 @@ export class TraeLanguageModel implements LanguageModelV2 {
 }
 
 function resolveTraeModelName(modelId: string, options?: TraeProviderOptions): string | undefined {
+  const normalizedModelId = stripProviderPrefix(modelId)
+  if (options?.enableToolCalling !== true && normalizedModelId === 'coding') return undefined
   if (options?.modelName) return options.modelName
-  if (modelId === 'default') return undefined
+  if (normalizedModelId === 'default') return undefined
   const aliases = {
     ...TRAE_MODEL_PROFILES,
     ...(options?.modelAliases ?? {}),
   }
-  return aliases[modelId] ?? modelId
+  return aliases[normalizedModelId] ?? normalizedModelId
+}
+
+function stripProviderPrefix(modelId: string): string {
+  return modelId.startsWith('trae/') ? modelId.slice('trae/'.length) : modelId
 }
 
 function emitResult(

@@ -111,6 +111,24 @@ describe('TraeProviderPlugin', () => {
     await hooks.config!(config)
 
     expect(config.provider?.trae?.options).toMatchObject({
+      enableToolCalling: false,
+      includeToolHistory: false,
+      enforceTextOnly: true,
+      maxPromptMessages: 60,
+      maxPromptChars: 20000,
+      maxToolPayloadChars: 3000,
+      injectCodingSystemPrompt: true,
+    })
+  })
+
+  it('applies coding profile defaults when explicitly requested', async () => {
+    const hooks = await pluginModule.TraeProviderPlugin({
+      profile: 'coding',
+    })
+    const config = {} as Config
+    await hooks.config!(config)
+
+    expect(config.provider?.trae?.options).toMatchObject({
       modelName: 'GLM-5.1',
       enableToolCalling: true,
       includeToolHistory: true,
@@ -120,5 +138,24 @@ describe('TraeProviderPlugin', () => {
       maxToolPayloadChars: 4000,
       injectCodingSystemPrompt: true,
     })
+  })
+
+  it('applies coding-lite profile defaults as stable coding preset', async () => {
+    const hooks = await pluginModule.TraeProviderPlugin({
+      profile: 'coding-lite',
+    })
+    const config = {} as Config
+    await hooks.config!(config)
+
+    expect(config.provider?.trae?.options).toMatchObject({
+      enableToolCalling: false,
+      includeToolHistory: false,
+      enforceTextOnly: true,
+      maxPromptMessages: 60,
+      maxPromptChars: 20000,
+      maxToolPayloadChars: 3000,
+      injectCodingSystemPrompt: true,
+    })
+    expect(config.provider?.trae?.options?.modelName).toBeUndefined()
   })
 })

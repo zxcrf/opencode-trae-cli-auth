@@ -5,7 +5,7 @@ import { discoverTraeModels } from './src/trae-config-models.js'
 import { resolveTraeCliPath } from './src/trae-language-model.js'
 
 type TraePluginOptions = {
-  profile?: 'coding' | 'text' | 'tools'
+  profile?: 'coding' | 'coding-lite' | 'text' | 'tools'
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
@@ -105,7 +105,7 @@ function applyCapabilityOverrides(
 }
 
 function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
-  if (options.profile === 'coding' || !options.profile) {
+  if (options.profile === 'coding') {
     return {
       ...options,
       modelName: options.modelName ?? TRAE_MODEL_PROFILES.coding,
@@ -115,6 +115,18 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
       maxPromptMessages: options.maxPromptMessages ?? 60,
       maxPromptChars: options.maxPromptChars ?? 20000,
       maxToolPayloadChars: options.maxToolPayloadChars ?? 4000,
+      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? true,
+    }
+  }
+  if (options.profile === 'coding-lite' || !options.profile) {
+    return {
+      ...options,
+      enableToolCalling: options.enableToolCalling ?? false,
+      includeToolHistory: options.includeToolHistory ?? false,
+      enforceTextOnly: options.enforceTextOnly ?? true,
+      maxPromptMessages: options.maxPromptMessages ?? 60,
+      maxPromptChars: options.maxPromptChars ?? 20000,
+      maxToolPayloadChars: options.maxToolPayloadChars ?? 3000,
       injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? true,
     }
   }

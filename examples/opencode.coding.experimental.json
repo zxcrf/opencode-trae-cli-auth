@@ -2,13 +2,14 @@
   "provider": {
     "trae": {
       "options": {
-        "profile": "coding-lite",
-        "enableToolCalling": false,
-        "includeToolHistory": false,
-        "enforceTextOnly": true,
+        "profile": "coding",
+        "modelName": "GLM-5.1",
+        "enableToolCalling": true,
+        "includeToolHistory": true,
+        "enforceTextOnly": false,
         "maxPromptMessages": 60,
         "maxPromptChars": 20000,
-        "maxToolPayloadChars": 3000,
+        "maxToolPayloadChars": 4000,
         "maxRetries": 1,
         "retryDelayMs": 800
       }

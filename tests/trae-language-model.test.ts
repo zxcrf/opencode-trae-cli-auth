@@ -128,6 +128,64 @@ describe('TraeLanguageModel', () => {
     expect(args).toContain('model.name=MiniMax-M2.7')
   })
 
+  it('does not force model.name for coding alias in text-first mode', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('coding', { cliPath: '/usr/bin/traecli', enableToolCalling: false, enforceTextOnly: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      closeChild(child)
+    })
+    for await (const _ of (await streamPromise).stream as any) {}
+
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args).not.toContain('--config')
+    expect(args).not.toContain('model.name=GLM-5.1')
+  })
+
+  it('does not force model.name for trae/coding in text-first mode', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('trae/coding', { cliPath: '/usr/bin/traecli', enableToolCalling: false, enforceTextOnly: true })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      closeChild(child)
+    })
+    for await (const _ of (await streamPromise).stream as any) {}
+
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args).not.toContain('--config')
+    expect(args).not.toContain('model.name=GLM-5.1')
+  })
+
   it('omits tool history from prompt by default', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()

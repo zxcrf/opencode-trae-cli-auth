@@ -109,7 +109,7 @@ opencode run --model trae/GLM-5.1 "reply with 'ok'"
 
 ## Capability Boundary
 
-This package uses Trae CLI as the model backend. In default `coding` profile, tool-calling forwarding is enabled (`enableToolCalling=true`) so OpenCode can execute tools locally while Trae emits tool intents.
+This package uses Trae CLI as the model backend. The default `coding-lite` profile is optimized for stable coding-oriented text generation. The `coding` and `tools` profiles keep experimental tool-calling forwarding for agentic workflows.
 
 Tool execution still belongs to OpenCode runtime (permissions, sandbox, command execution). Trae CLI is not used as a standalone tool runtime.
 
@@ -119,7 +119,7 @@ When loading the plugin programmatically, the plugin accepts:
 
 ```ts
 type TraePluginOptions = {
-  profile?: "coding" | "text" | "tools"
+  profile?: "coding" | "coding-lite" | "text" | "tools"
   cliPath?: string
   modelName?: string
   modelAliases?: Record<string, string>
@@ -139,7 +139,7 @@ type TraePluginOptions = {
 }
 ```
 
-- `profile`: quick preset. default is `coding`. `coding` = coding-oriented defaults, `text` = stable text-only defaults, `tools` = experimental tool-calling defaults.
+- `profile`: quick preset. default is `coding-lite`. `coding-lite` = stable coding-oriented text generation, `coding` = experimental agentic coding defaults, `text` = stable text-only defaults, `tools` = experimental tool-calling defaults.
 - `cliPath`: override the `traecli` binary path.
 - `modelName`: force a Trae `model.name` regardless of opencode model id.
 - `modelAliases`: optional alias map, e.g. `{ coding: "GLM-5.1" }`, so users can call `trae/coding`.
@@ -148,8 +148,8 @@ type TraePluginOptions = {
 - `includeToolHistory`: defaults to `false`; omit prior `tool-call/tool-result` history from prompt to reduce context bloat in text-only mode.
 - `maxPromptMessages`: defaults to `40`; keep all `system` messages and only the most recent non-system messages.
 - `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.
-- `maxToolPayloadChars`: truncates oversized tool call inputs and tool result payloads before they are injected back into prompt history (default: `coding=4000`, `tools=6000`, `text=2000`).
-- `injectCodingSystemPrompt`: defaults by profile (`coding/tools=true`, `text=false`); injects a concise coding runtime system preamble to improve multi-turn tool use.
+- `maxToolPayloadChars`: truncates oversized tool call inputs and tool result payloads before they are injected back into prompt history (default: `coding-lite=3000`, `coding=4000`, `tools=6000`, `text=2000`).
+- `injectCodingSystemPrompt`: defaults by profile (`coding-lite/coding/tools=true`, `text=false`); injects a concise coding runtime system preamble to improve multi-turn tool use.
 - `codingSystemPreamble`: custom preamble text when `injectCodingSystemPrompt` is enabled.
 - `enforceTextOnly`: defaults to `true`; adds `--disallowed-tool` flags for common tools (`Read/Bash/Edit/Replace/Write/Glob/Grep/Task`) to keep Trae CLI in text-only behavior.
 - `maxRetries`: transient error retry count, default `1`.
@@ -183,7 +183,28 @@ opencode run --model trae/default "reply with ok"
 
 Recommended local config presets:
 
-Coding default preset:
+Coding-lite default preset:
+
+```json
+{
+  "provider": {
+    "trae": {
+      "options": {
+        "profile": "coding-lite",
+        "enableToolCalling": false,
+        "includeToolHistory": false,
+        "enforceTextOnly": true,
+        "maxPromptMessages": 60,
+        "maxPromptChars": 20000,
+        "maxToolPayloadChars": 3000
+      }
+    }
+  },
+  "model": "trae/coding"
+}
+```
+
+Experimental coding preset:
 
 ```json
 {
@@ -249,6 +270,7 @@ Experimental tool-calling preset:
 Ready-to-use config files are included:
 
 - `examples/opencode.coding.json`
+- `examples/opencode.coding.experimental.json`
 - `examples/opencode.text.json`
 - `examples/opencode.tools.json`
 
