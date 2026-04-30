@@ -112,7 +112,7 @@ async function runStreamingOnce(
 
   const child = spawn(args.cliPath, cliArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: buildTraeCliEnv(process.env),
   })
 
   const timeoutSeconds = normalizeTimeoutSeconds(args.queryTimeout ?? 120)
@@ -218,6 +218,15 @@ function shouldRetry(error: Error, attempt: number, maxRetries: number, abortSig
     msg.includes('socket hang up') ||
     msg.includes('connection reset')
   )
+}
+
+function buildTraeCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next = { ...env }
+  delete next.XDG_DATA_HOME
+  delete next.XDG_CONFIG_HOME
+  delete next.XDG_CACHE_HOME
+  delete next.XDG_STATE_HOME
+  return next
 }
 
 function shouldRetryWithoutModelConfig(error: Error, args: CliLlmRunOptions): boolean {

@@ -141,7 +141,7 @@ type TraePluginOptions = {
 
 - `profile`: quick preset. default is `coding-lite`. `coding-lite` = stable coding-oriented text generation, `coding` = experimental agentic coding defaults, `text` = stable text-only defaults, `tools` = experimental tool-calling defaults.
 - `cliPath`: override the `traecli` binary path.
-- `modelName`: force a Trae `model.name` regardless of opencode model id.
+- `modelName`: force a Trae `model.name` regardless of opencode model id. Leave unset to use the model currently configured in Trae CLI; this is the most compatible mode.
 - `modelAliases`: optional alias map, e.g. `{ coding: "GLM-5.1" }`, so users can call `trae/coding`.
 - `enableToolCalling`: experimental, defaults to `false`; when `true`, provider forwards Trae `function` tool calls to OpenCode.
 - `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
@@ -212,7 +212,6 @@ Experimental coding preset:
     "trae": {
       "options": {
         "profile": "coding",
-        "modelName": "GLM-5.1",
         "enableToolCalling": true,
         "includeToolHistory": true,
         "enforceTextOnly": false,

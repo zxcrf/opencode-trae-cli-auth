@@ -129,7 +129,32 @@ describe('TraeProviderPlugin', () => {
     await hooks.config!(config)
 
     expect(config.provider?.trae?.options).toMatchObject({
-      modelName: 'GLM-5.1',
+      enableToolCalling: true,
+      includeToolHistory: true,
+      enforceTextOnly: false,
+      maxPromptMessages: 60,
+      maxPromptChars: 20000,
+      maxToolPayloadChars: 4000,
+      injectCodingSystemPrompt: true,
+    })
+    expect(config.provider?.trae?.options?.modelName).toBeUndefined()
+  })
+
+  it('applies existing provider options before profile defaults', async () => {
+    const hooks = await pluginModule.TraeProviderPlugin({})
+    const config = {
+      provider: {
+        trae: {
+          options: {
+            profile: 'coding',
+          },
+        },
+      },
+    } as unknown as Config
+    await hooks.config!(config)
+
+    expect(config.provider?.trae?.options).toMatchObject({
+      profile: 'coding',
       enableToolCalling: true,
       includeToolHistory: true,
       enforceTextOnly: false,

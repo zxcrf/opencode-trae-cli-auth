@@ -35,7 +35,7 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
       config.provider = config.provider ?? {}
       const existing = config.provider.trae ?? {}
       const discoveredModels = discoverTraeModels()
-      const effectiveOptions = withProfileDefaults(options)
+      const effectiveOptions = withProfileDefaults({ ...(existing.options ?? {}), ...options } as TraePluginOptions)
       const mergedModels = applyCapabilityOverrides(
         { ...TRAE_MODELS, ...discoveredModels, ...(existing.models ?? {}) },
         effectiveOptions,
@@ -46,8 +46,8 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
         npm: existing.npm ?? providerFileUrl,
         name: existing.name ?? 'Trae',
         options: {
-          ...(existing.options ?? {}),
           ...(effectiveOptions.cliPath ? { cliPath: effectiveOptions.cliPath } : {}),
+          ...(effectiveOptions.profile ? { profile: effectiveOptions.profile } : {}),
           ...(effectiveOptions.modelName ? { modelName: effectiveOptions.modelName } : {}),
           ...(typeof effectiveOptions.modelAliases === 'object' && effectiveOptions.modelAliases ? { modelAliases: effectiveOptions.modelAliases } : {}),
           ...(typeof effectiveOptions.enableToolCalling === 'boolean' ? { enableToolCalling: effectiveOptions.enableToolCalling } : {}),
@@ -108,7 +108,6 @@ function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
   if (options.profile === 'coding') {
     return {
       ...options,
-      modelName: options.modelName ?? TRAE_MODEL_PROFILES.coding,
       enableToolCalling: options.enableToolCalling ?? true,
       includeToolHistory: options.includeToolHistory ?? true,
       enforceTextOnly: options.enforceTextOnly ?? false,

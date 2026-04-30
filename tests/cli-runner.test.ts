@@ -89,6 +89,30 @@ describe('runCliLlm', () => {
     ])
   })
 
+  it('does not inherit opencode XDG data isolation into trae cli', async () => {
+    const originalXdgDataHome = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = '/tmp/opencode-isolated-data'
+    try {
+      const { child, stdout, stderr } = makeChild()
+      spawnMock.mockReturnValue(child)
+      const { runCliLlm } = await import('../src/cli/cli-runner.js')
+      const promise = runCliLlm({
+        cliPath: '/usr/bin/traecli',
+        prompt: 'hello',
+      })
+
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      child.emit('close', 0)
+
+      await expect(promise).resolves.toMatchObject({ message: { content: 'ok' } })
+      expect(spawnMock.mock.calls[0][2]?.env).not.toHaveProperty('XDG_DATA_HOME')
+    } finally {
+      if (originalXdgDataHome === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = originalXdgDataHome
+    }
+  })
+
   it('streams parsed json values before the process closes', async () => {
     const { child, stdout, stderr } = makeChild()
     spawnMock.mockReturnValue(child)

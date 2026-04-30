@@ -3,7 +3,6 @@
     "trae": {
       "options": {
         "profile": "coding",
-        "modelName": "GLM-5.1",
         "enableToolCalling": true,
         "includeToolHistory": true,
         "enforceTextOnly": false,

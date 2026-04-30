@@ -227,8 +227,8 @@ export class TraeLanguageModel implements LanguageModelV2 {
 
 function resolveTraeModelName(modelId: string, options?: TraeProviderOptions): string | undefined {
   const normalizedModelId = stripProviderPrefix(modelId)
-  if (options?.enableToolCalling !== true && normalizedModelId === 'coding') return undefined
   if (options?.modelName) return options.modelName
+  if (normalizedModelId === 'coding' && !options?.modelAliases?.coding) return undefined
   if (normalizedModelId === 'default') return undefined
   const aliases = {
     ...TRAE_MODEL_PROFILES,
