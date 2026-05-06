@@ -22,6 +22,7 @@ export const TRAE_CLOUD_MODEL_IDS = [
   'GLM-5.1',
   'MiniMax-M2.7',
   'Kimi-K2.6',
+  'DeepSeek-V4-Pro',
 ] as const
 
 export const TRAE_MODEL_PROFILES = {

@@ -29,6 +29,7 @@ describe('TraeProviderPlugin', () => {
 
   beforeEach(async () => {
     vi.resetModules()
+    vi.unstubAllEnvs()
     pluginModule = await import('../index.js')
   })
 
@@ -38,19 +39,12 @@ describe('TraeProviderPlugin', () => {
 
   it('injects provider metadata and options', async () => {
     const hooks = await pluginModule.TraeProviderPlugin({
-      cliPath: '/custom/traecli',
-      queryTimeout: 33,
-      modelAliases: { coding: 'GLM-5.1' },
+      openaiBaseURL: 'https://example.test/v1',
+      openaiApiKey: 'test-key',
       enableToolCalling: true,
-      includeToolHistory: false,
-      maxPromptMessages: 30,
-      maxPromptChars: 16000,
-      maxToolPayloadChars: 3000,
-      injectCodingSystemPrompt: false,
-      enforceTextOnly: true,
-      maxRetries: 2,
-      retryDelayMs: 400,
-      extraArgs: ['--verbose'],
+      allowCliFallback: true,
+      cliPath: '/custom/traecli',
+      modelName: 'Kimi-K2.6',
     })
     const config = {} as Config
     await hooks.config!(config)
@@ -64,18 +58,10 @@ describe('TraeProviderPlugin', () => {
     expect(config.provider?.trae?.models?.sonnet?.attachment).toBe(false)
     expect(config.provider?.trae?.options).toMatchObject({
       cliPath: '/custom/traecli',
-      queryTimeout: 33,
-      modelAliases: { coding: 'GLM-5.1' },
+      openaiBaseURL: 'https://example.test/v1',
+      openaiApiKey: 'test-key',
+      modelName: 'Kimi-K2.6',
       enableToolCalling: true,
-      includeToolHistory: false,
-      maxPromptMessages: 30,
-      maxPromptChars: 16000,
-      maxToolPayloadChars: 3000,
-      injectCodingSystemPrompt: false,
-      enforceTextOnly: true,
-      maxRetries: 2,
-      retryDelayMs: 400,
-      extraArgs: ['--verbose'],
     })
   })
 
@@ -86,101 +72,64 @@ describe('TraeProviderPlugin', () => {
     expect(await method?.authorize?.()).toMatchObject({ type: 'success', key: 'trae-cli-auth' })
   })
 
-  it('applies tools profile defaults with explicit override support', async () => {
-    const hooks = await pluginModule.TraeProviderPlugin({
-      profile: 'tools',
-      maxPromptChars: 20000,
-    })
-    const config = {} as Config
-    await hooks.config!(config)
-
-    expect(config.provider?.trae?.options).toMatchObject({
-      enableToolCalling: true,
-      includeToolHistory: true,
-      enforceTextOnly: false,
-      maxPromptMessages: 50,
-      maxPromptChars: 20000,
-      maxToolPayloadChars: 6000,
-      injectCodingSystemPrompt: true,
-    })
-  })
-
-  it('uses coding profile defaults when profile is not specified', async () => {
+  it('does not enable legacy Trae CLI fallback by default', async () => {
     const hooks = await pluginModule.TraeProviderPlugin({})
     const config = {} as Config
     await hooks.config!(config)
 
-    expect(config.provider?.trae?.options).toMatchObject({
-      enableToolCalling: false,
-      includeToolHistory: false,
-      enforceTextOnly: true,
-      maxPromptMessages: 60,
-      maxPromptChars: 20000,
-      maxToolPayloadChars: 3000,
-      injectCodingSystemPrompt: true,
-    })
+    expect(config.provider?.trae?.options?.allowCliFallback).toBe(false)
+    expect(config.provider?.trae?.options?.cliPath).toBeUndefined()
   })
 
-  it('applies coding profile defaults when explicitly requested', async () => {
-    const hooks = await pluginModule.TraeProviderPlugin({
-      profile: 'coding',
-    })
-    const config = {} as Config
-    await hooks.config!(config)
+  it('does not read OpenAI-compatible transport tokens from environment variables', async () => {
+    vi.stubEnv('TRAE_OPENAI_BASE_URL', 'https://env.example.test/v1')
+    vi.stubEnv('TRAE_OPENAI_API_KEY', 'env-key')
 
-    expect(config.provider?.trae?.options).toMatchObject({
-      enableToolCalling: true,
-      includeToolHistory: true,
-      enforceTextOnly: false,
-      maxPromptMessages: 60,
-      maxPromptChars: 20000,
-      maxToolPayloadChars: 4000,
-      injectCodingSystemPrompt: true,
-    })
-    expect(config.provider?.trae?.options?.modelName).toBeUndefined()
-  })
-
-  it('applies existing provider options before profile defaults', async () => {
     const hooks = await pluginModule.TraeProviderPlugin({})
-    const config = {
-      provider: {
-        trae: {
-          options: {
-            profile: 'coding',
-          },
-        },
-      },
-    } as unknown as Config
+    const config = {} as Config
     await hooks.config!(config)
 
-    expect(config.provider?.trae?.options).toMatchObject({
-      profile: 'coding',
-      enableToolCalling: true,
-      includeToolHistory: true,
-      enforceTextOnly: false,
-      maxPromptMessages: 60,
-      maxPromptChars: 20000,
-      maxToolPayloadChars: 4000,
-      injectCodingSystemPrompt: true,
-    })
+    expect(config.provider?.trae?.options?.openaiBaseURL).toBeUndefined()
+    expect(config.provider?.trae?.options?.openaiApiKey).toBeUndefined()
   })
 
-  it('applies coding-lite profile defaults as stable coding preset', async () => {
+  it('uses explicit pat option for Trae raw chat auth exchange with enterprise API default base URL', async () => {
     const hooks = await pluginModule.TraeProviderPlugin({
-      profile: 'coding-lite',
-    })
+      pat: 'explicit-pat',
+    } as any)
     const config = {} as Config
     await hooks.config!(config)
 
     expect(config.provider?.trae?.options).toMatchObject({
-      enableToolCalling: false,
-      includeToolHistory: false,
-      enforceTextOnly: true,
-      maxPromptMessages: 60,
-      maxPromptChars: 20000,
-      maxToolPayloadChars: 3000,
-      injectCodingSystemPrompt: true,
+      pat: 'explicit-pat',
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      allowCliFallback: false,
     })
-    expect(config.provider?.trae?.options?.modelName).toBeUndefined()
+    expect(config.provider?.trae?.options?.traeRawApiKey).toBeUndefined()
+  })
+
+  it('does not treat the PAT placeholder as a configured raw chat token', async () => {
+    const hooks = await pluginModule.TraeProviderPlugin({
+      pat: 'REPLACE_WITH_TRAE_PAT',
+    } as any)
+    const config = {} as Config
+    await hooks.config!(config)
+
+    expect(config.provider?.trae?.options?.pat).toBeUndefined()
+    expect(config.provider?.trae?.options?.traeRawBaseURL).toBeUndefined()
+    expect(config.provider?.trae?.options?.traeRawApiKey).toBeUndefined()
+  })
+
+  it('does not read Trae tokens from environment variables', async () => {
+    vi.stubEnv('TRAE_RAW_BASE_URL', 'https://env.example.test')
+    vi.stubEnv('TRAE_RAW_API_KEY', 'raw-env-key')
+    vi.stubEnv('TRAECLI_PERSONAL_ACCESS_TOKEN', 'pat-env-key')
+
+    const hooks = await pluginModule.TraeProviderPlugin({})
+    const config = {} as Config
+    await hooks.config!(config)
+
+    expect(config.provider?.trae?.options?.traeRawBaseURL).toBeUndefined()
+    expect(config.provider?.trae?.options?.traeRawApiKey).toBeUndefined()
   })
 })

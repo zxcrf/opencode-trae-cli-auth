@@ -137,6 +137,31 @@ describe('prompt builder', () => {
     expect(prompt).toContain('TAIL')
   })
 
+  it('keeps task reminder at the prompt tail after oversized tool history', () => {
+    const prompt = buildPrompt([
+      { role: 'user', content: [{ type: 'text', text: 'read manifests and summarize risks' }] },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call-1',
+            toolName: 'read',
+            output: { type: 'text', value: 'x'.repeat(1000) },
+          },
+        ],
+      },
+    ] as any, {
+      includeToolHistory: true,
+      maxChars: 300,
+      taskReminder: 'read manifests and summarize risks',
+    })
+
+    expect(prompt).toContain('[Prompt truncated:')
+    expect(prompt).toContain('Current task reminder:')
+    expect(prompt).toContain('read manifests and summarize risks')
+  })
+
   it('keeps only recent non-system messages when maxMessages is set', () => {
     const prompt = buildPrompt([
       { role: 'system', content: 'Always concise.' },

@@ -1,13 +1,14 @@
 {
+  "default_agent": "build",
   "provider": {
     "trae": {
       "options": {
-        "profile": "text",
         "enableToolCalling": false,
+        "includeToolHistory": false,
         "enforceTextOnly": true,
-        "maxPromptMessages": 40,
-        "maxPromptChars": 12000,
-        "maxToolPayloadChars": 2000,
+        "maxPromptMessages": 60,
+        "maxPromptChars": 20000,
+        "maxToolPayloadChars": 4000,
         "maxRetries": 1,
         "retryDelayMs": 800
       }

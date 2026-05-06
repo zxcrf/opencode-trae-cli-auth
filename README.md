@@ -1,13 +1,15 @@
 # opencode-trae-cli-auth
 
-An [opencode](https://opencode.ai/) provider plugin that proxies model calls through your local `traecli` login.
+An [opencode](https://opencode.ai/) provider plugin that exposes Trae models through Trae raw-chat SSE or an OpenAI-compatible HTTP endpoint.
 
-It is useful when Trae CLI already works locally and you want to use the same account/models from opencode.
+It is intended to make Trae act as an LLM backend for opencode. For coding workflows, use OAuth/PAT plus a provider base URL; the legacy `traecli` subprocess path is disabled by default.
 
 ## Features
 
 - Adds a `trae` provider to opencode.
-- Uses the local `traecli` binary and existing Trae login; no API key is stored by this package.
+- Prefers direct Trae raw-chat SSE streaming when `pat` is configured.
+- Supports generic OpenAI-compatible streaming when `openaiBaseURL` and `openaiApiKey` are configured.
+- Disables legacy `traecli` fallback by default to avoid CLI-internal tool restrictions leaking into OpenCode.
 - Exposes common Trae cloud models, including `GLM-5.1`, `Doubao-Seed-2.0-Code`, `DeepSeek-V3.2`, `Qwen3-Coder-Next`, and more.
 - Reads the current model from `~/.trae/trae_cli.yaml` / `~/.trae/traecli.yaml` when available.
 - Provides stable text-first generation and an optional experimental tool-call bridge for coding workflows.
@@ -17,15 +19,7 @@ It is useful when Trae CLI already works locally and you want to use the same ac
 
 - Node.js >= 20
 - opencode >= 1.14
-- `traecli` installed and logged in
-
-Verify Trae CLI first:
-
-```bash
-traecli "reply with 'ok'" -p --json
-```
-
-If this command fails, fix Trae CLI login/config before using this plugin.
+- A Trae enterprise/PAT token or an OpenAI-compatible endpoint token
 
 ## Install
 
@@ -90,80 +84,61 @@ Built-in model ids currently include:
 - `trae/Qwen3-Coder-Next`
 - `trae/Kimi-K2.6`
 - `trae/Kimi-K2.5`
+- `trae/DeepSeek-V4-Pro`
 - `trae/DeepSeek-V3.2`
 - `trae/DeepSeek-V3.1-Terminus`
 
-`trae/default` does not pass `model.name` and uses the default model selected in Trae CLI.
-
-Other model ids are passed to Trae CLI as:
-
-```bash
---config model.name=<model-id>
-```
+Aliases such as `trae/fast`, `trae/balanced`, `trae/strong`, and `trae/coding` are mapped by the provider before calling direct HTTP transports.
 
 ## Usage
 
 ```bash
-opencode run --model trae/GLM-5.1 "reply with 'ok'"
+opencode run --agent build --model trae/GLM-5.1 "reply with 'ok'"
 ```
 
 ## Capability Boundary
 
-This package uses Trae CLI as the model backend. The default `coding-lite` profile is optimized for stable coding-oriented text generation. The `coding` and `tools` profiles keep experimental tool-calling forwarding for agentic workflows.
+This package can use these backend transports:
+
+- Direct Trae raw-chat HTTP: enabled by `pat`; posts to Trae enterprise raw chat and consumes real SSE output.
+- Direct OpenAI-compatible HTTP: enabled by `openaiBaseURL` + `openaiApiKey`; supports SSE text streaming and OpenAI-style streamed `tool_calls`.
+- Legacy Trae CLI fallback: disabled by default. Enable only with `allowCliFallback: true` for debugging or migration.
+
+The provider uses a single model-first configuration path. Users select a model directly, and behavior changes only through explicit options.
 
 Tool execution still belongs to OpenCode runtime (permissions, sandbox, command execution). Trae CLI is not used as a standalone tool runtime.
 
 ## Options
 
-When loading the plugin programmatically, the plugin accepts:
+When loading the plugin programmatically, the intended user-facing options are:
 
 ```ts
 type TraePluginOptions = {
-  profile?: "coding" | "coding-lite" | "text" | "tools"
-  cliPath?: string
+  pat?: string
+  openaiBaseURL?: string
+  openaiApiKey?: string
   modelName?: string
-  modelAliases?: Record<string, string>
   enableToolCalling?: boolean
-  queryTimeout?: number
-  includeToolHistory?: boolean
-  maxPromptMessages?: number
-  maxPromptChars?: number
-  maxToolPayloadChars?: number
-  codingSystemPreamble?: string
-  injectCodingSystemPrompt?: boolean
-  enforceTextOnly?: boolean
-  maxRetries?: number
-  retryDelayMs?: number
-  extraArgs?: string[]
-  sessionId?: string
+  allowCliFallback?: boolean
+  cliPath?: string
 }
 ```
 
-- `profile`: quick preset. default is `coding-lite`. `coding-lite` = stable coding-oriented text generation, `coding` = experimental agentic coding defaults, `text` = stable text-only defaults, `tools` = experimental tool-calling defaults.
-- `cliPath`: override the `traecli` binary path.
-- `modelName`: force a Trae `model.name` regardless of opencode model id. Leave unset to use the model currently configured in Trae CLI; this is the most compatible mode.
-- `modelAliases`: optional alias map, e.g. `{ coding: "GLM-5.1" }`, so users can call `trae/coding`.
-- `enableToolCalling`: experimental, defaults to `false`; when `true`, provider forwards Trae `function` tool calls to OpenCode.
-- `queryTimeout`: timeout in seconds for `traecli --query-timeout`.
-- `includeToolHistory`: defaults to `false`; omit prior `tool-call/tool-result` history from prompt to reduce context bloat in text-only mode.
-- `maxPromptMessages`: defaults to `40`; keep all `system` messages and only the most recent non-system messages.
-- `maxPromptChars`: defaults to `12000`; truncates oversized serialized prompt from the head and keeps the newest tail context.
-- `maxToolPayloadChars`: truncates oversized tool call inputs and tool result payloads before they are injected back into prompt history (default: `coding-lite=3000`, `coding=4000`, `tools=6000`, `text=2000`).
-- `injectCodingSystemPrompt`: defaults by profile (`coding-lite/coding/tools=true`, `text=false`); injects a concise coding runtime system preamble to improve multi-turn tool use.
-- `codingSystemPreamble`: custom preamble text when `injectCodingSystemPrompt` is enabled.
-- `enforceTextOnly`: defaults to `true`; adds `--disallowed-tool` flags for common tools (`Read/Bash/Edit/Replace/Write/Glob/Grep/Task`) to keep Trae CLI in text-only behavior.
-- `maxRetries`: transient error retry count, default `1`.
-- `retryDelayMs`: delay between retries in milliseconds, default `800`.
-- `extraArgs`: extra arguments appended to `traecli`.
-- `sessionId`: forwarded to Trae CLI as `--session-id`, useful for callers that need stable Trae-side session affinity.
+- `pat`: explicit Trae PAT/OAuth token for direct raw-chat transport. This is intentionally read only from `provider.trae.options.pat`, not from environment variables.
+- `openaiBaseURL`: optional OpenAI-compatible base URL. When set with `openaiApiKey`, this transport is used before CLI fallback.
+- `openaiApiKey`: bearer token for the OpenAI-compatible endpoint.
+- `modelName`: force a Trae `model.name` regardless of opencode model id. Leave unset to use the selected opencode model id directly.
+- `enableToolCalling`: defaults to `true`; when `true`, provider forwards Trae `function` tool calls to OpenCode.
+- `allowCliFallback`: defaults to `false`. Keep it false for real OpenCode usage; set true only to debug the legacy `traecli` subprocess path.
+- `cliPath`: legacy only; override the `traecli` binary path when `allowCliFallback=true`.
 
 ## Known limitations
 
 - Tool execution depends on OpenCode runtime permissions and sandbox policy.
-- Experimental mode: `enableToolCalling=true` only supports forwarding function tool calls observed in Trae JSON output; behavior may vary across Trae CLI versions.
+- Experimental mode: `enableToolCalling=true` supports forwarding streamed function tool calls observed from direct HTTP transports.
 - In experimental tool-calling mode, common tool input aliases are normalized (`file_path -> filePath`, `old_string/new_string -> oldString/newString`, etc.).
-- Usage/token counts may be zero when Trae CLI does not emit usage metadata.
-- Trae CLI may print `keyring is not supported on this system`; this is a Trae CLI environment warning and usually does not prevent responses.
+- Usage/token counts may be zero when the upstream transport does not emit usage metadata.
+- Legacy CLI mode can leak `traecli` internal tool restrictions into model behavior and is not recommended for coding agents.
 
 ## Development
 
@@ -178,100 +153,60 @@ Smoke check a local Trae CLI and OpenCode install:
 
 ```bash
 traecli "reply with ok" -p --json
-opencode run --model trae/default "reply with ok"
+opencode run --agent build --model trae/default "reply with ok"
 ```
 
-Recommended local config presets:
+Recommended local config examples:
 
-Coding-lite default preset:
+Direct Trae raw-chat transport:
 
 ```json
 {
   "provider": {
     "trae": {
       "options": {
-        "profile": "coding-lite",
-        "enableToolCalling": false,
-        "includeToolHistory": false,
-        "enforceTextOnly": true,
-        "maxPromptMessages": 60,
-        "maxPromptChars": 20000,
-        "maxToolPayloadChars": 3000
+        "pat": "your-token"
       }
     }
   },
-  "model": "trae/coding"
+  "model": "trae/Kimi-K2.6"
 }
 ```
 
-Experimental coding preset:
+`pat` is explicit by design. The plugin does not read `TRAE_RAW_API_KEY`, `TRAECLI_PERSONAL_ACCESS_TOKEN`, or other token environment variables.
+
+Direct OpenAI-compatible transport:
 
 ```json
 {
   "provider": {
     "trae": {
       "options": {
-        "profile": "coding",
-        "enableToolCalling": true,
-        "includeToolHistory": true,
-        "enforceTextOnly": false,
-        "maxPromptMessages": 60,
-        "maxPromptChars": 20000,
-        "maxToolPayloadChars": 4000
+        "openaiBaseURL": "https://your-enterprise-openai-compatible-host/v1",
+        "openaiApiKey": "your-token"
       }
     }
   },
-  "model": "trae/coding"
+  "model": "trae/DeepSeek-V4-Pro"
 }
 ```
 
-Text-only stable preset:
+OpenAI-compatible credentials are also explicit config only; the plugin does not read token environment variables.
+
+Legacy CLI debug example:
 
 ```json
 {
   "provider": {
     "trae": {
       "options": {
-        "profile": "text",
-        "enableToolCalling": false,
-        "enforceTextOnly": true,
-        "maxPromptMessages": 40,
-        "maxPromptChars": 12000,
-        "maxToolPayloadChars": 2000
+        "allowCliFallback": true
       }
     }
   },
-  "model": "trae/coding"
+  "model": "trae/GLM-5.1"
 }
 ```
-
-Experimental tool-calling preset:
-
-```json
-{
-  "provider": {
-    "trae": {
-      "options": {
-        "profile": "tools",
-        "enableToolCalling": true,
-        "includeToolHistory": true,
-        "enforceTextOnly": false,
-        "maxPromptMessages": 50,
-        "maxPromptChars": 16000,
-        "maxToolPayloadChars": 6000
-      }
-    }
-  },
-  "model": "trae/coding"
-}
-```
-
-Ready-to-use config files are included:
-
-- `examples/opencode.coding.json`
-- `examples/opencode.coding.experimental.json`
-- `examples/opencode.text.json`
-- `examples/opencode.tools.json`
 
 Optional soak test (success rate + latency summary):
 
@@ -294,7 +229,7 @@ bun run smoke:tools -- --model trae/coding --strict
 Overnight agentic run (prompt-file driven, no built-in demo prompts):
 
 ```bash
-npm run overnight -- \
+bun run overnight -- \
   --model trae/coding \
   --hours 8 \
   --concurrency 2 \

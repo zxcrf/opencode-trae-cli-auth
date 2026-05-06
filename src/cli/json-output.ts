@@ -74,6 +74,12 @@ export type TraeFunctionToolCall = {
   input: string
 }
 
+const TEXT_TOOL_CALL_RE = /<opencode_tool_call>\s*([\s\S]*?)\s*<\/opencode_tool_call>/gi
+const TRAE_XML_TOOL_CALL_RE = /<tool_use>\s*([\s\S]*?)\s*<\/tool_use>/gi
+const TRAE_COMPACT_TOOL_CALL_RE = /<tool_call>\s*([^\s<]+)\s*<\/arg_key>\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*([\s\S]*?)(?=\n---|\n<tool_call>|$)/gi
+const TRAE_JSON_CLOSE_TOOL_CALL_RE = /(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})\s*<\/tool_call>/gi
+const TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE = /(?<!["A-Za-z0-9_])"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}\s*<\/tool_call>/gi
+
 export function extractFunctionToolCalls(result: TraeCliResult): TraeFunctionToolCall[] {
   if (hasFinalTopLevelText(result)) return []
   const allMessages = (result.agent_states ?? []).flatMap((state) => state.messages ?? [])
@@ -98,6 +104,137 @@ export function extractFunctionToolCalls(result: TraeCliResult): TraeFunctionToo
   return [...deduped.values()]
 }
 
+export function extractTextToolCalls(content: unknown): TraeFunctionToolCall[] {
+  const text = contentToPlainText(content)
+  if (!text) return []
+  const calls: TraeFunctionToolCall[] = []
+  let match: RegExpExecArray | null
+  TEXT_TOOL_CALL_RE.lastIndex = 0
+  while ((match = TEXT_TOOL_CALL_RE.exec(text))) {
+    const parsed = parseTextToolCall(match[1], calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  TRAE_XML_TOOL_CALL_RE.lastIndex = 0
+  while ((match = TRAE_XML_TOOL_CALL_RE.exec(text))) {
+    const parsed = parseTraeXmlToolCall(match[1], calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  TRAE_COMPACT_TOOL_CALL_RE.lastIndex = 0
+  while ((match = TRAE_COMPACT_TOOL_CALL_RE.exec(text))) {
+    const parsed = parseTraeCompactToolCall(match, calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  TRAE_JSON_CLOSE_TOOL_CALL_RE.lastIndex = 0
+  while ((match = TRAE_JSON_CLOSE_TOOL_CALL_RE.exec(text))) {
+    const parsed = parseTextToolCall(match[1], calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE.lastIndex = 0
+  while ((match = TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE.exec(text))) {
+    const prefix = text.slice(Math.max(0, match.index - 64), match.index)
+    if (/"name"\s*:/.test(prefix)) continue
+    const parsed = parseTraeArgumentsOnlyToolCall(match[1], calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  return calls
+}
+
+export function stripTextToolCallBlocks(content: unknown): string {
+  const text = contentToPlainText(content)
+  if (!text) return ''
+  return text
+    .replace(TEXT_TOOL_CALL_RE, '')
+    .replace(TRAE_XML_TOOL_CALL_RE, '')
+    .replace(TRAE_COMPACT_TOOL_CALL_RE, '')
+    .replace(TRAE_JSON_CLOSE_TOOL_CALL_RE, '')
+    .replace(TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE, '')
+    .replace(/^\s*---\s*$/gm, '')
+    .trim()
+}
+
+function parseTextToolCall(raw: string, index: number): TraeFunctionToolCall | undefined {
+  try {
+    const parsed = JSON.parse(raw.trim()) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const name = pickNonEmptyString(parsed.name) ?? pickNonEmptyString(parsed.tool)
+    if (!name) return undefined
+    const id = pickNonEmptyString(parsed.id) ?? `trae-text-tool-${index}`
+    const input = parsed.input ?? parsed.arguments ?? {}
+    return {
+      id,
+      name,
+      input: stringifyToolInput(input),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function parseTraeXmlToolCall(raw: string, index: number): TraeFunctionToolCall | undefined {
+  const toolName = extractXmlTag(raw, 'tool_name') ?? extractXmlTag(raw, 'server_name')
+  const input = extractXmlTag(raw, 'input')
+  if (!toolName) return undefined
+  return {
+    id: `trae-text-tool-${index}`,
+    name: toolName,
+    input: normalizeJsonTextInput(input),
+  }
+}
+
+function parseTraeCompactToolCall(match: RegExpExecArray, index: number): TraeFunctionToolCall | undefined {
+  const name = pickNonEmptyString(match[1])
+  const key = pickNonEmptyString(match[2])
+  const value = pickNonEmptyString(match[3]?.replace(/\n---\s*$/, ''))
+  if (!name || !key || !value) return undefined
+  return {
+    id: `trae-text-tool-${index}`,
+    name,
+    input: JSON.stringify({ [key]: value }),
+  }
+}
+
+function parseTraeArgumentsOnlyToolCall(rawArguments: string, index: number): TraeFunctionToolCall | undefined {
+  try {
+    const parsed = JSON.parse(rawArguments.trim()) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    if (!('command' in parsed) && !('cmd' in parsed) && !('shell' in parsed) && !('script' in parsed)) return undefined
+    return {
+      id: `trae-text-tool-${index}`,
+      name: 'bash',
+      input: stringifyToolInput(parsed),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function extractXmlTag(text: string, tag: string): string | undefined {
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = new RegExp(`<${escaped}>\\s*([\\s\\S]*?)\\s*<\\/${escaped}>`, 'i').exec(text)
+  return pickNonEmptyString(match?.[1])
+}
+
+function normalizeJsonTextInput(value: string | undefined): string {
+  if (!value) return '{}'
+  try {
+    const parsed = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '{}'
+    return JSON.stringify(parsed)
+  } catch {
+    return value.trim()
+  }
+}
+
+function stringifyToolInput(input: unknown): string {
+  if (typeof input === 'string' && input.trim()) return input
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return '{}'
+  return JSON.stringify(input)
+}
+
+function pickNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
 function hasFinalTopLevelText(result: TraeCliResult): boolean {
   const finishReason = result.message?.response_meta?.finish_reason
   if (finishReason && finishReason !== 'stop') return false
@@ -113,6 +250,18 @@ function hasTextContent(content: unknown): boolean {
     const record = part as Record<string, unknown>
     return record.type === 'text' && typeof record.text === 'string' && record.text.trim().length > 0
   })
+}
+
+function contentToPlainText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map((part) => {
+    if (typeof part === 'string') return part
+    if (!part || typeof part !== 'object') return ''
+    const record = part as Record<string, unknown>
+    if (record.type === 'text' && typeof record.text === 'string') return record.text
+    return ''
+  }).join('')
 }
 
 function findLastAssistantMessage(

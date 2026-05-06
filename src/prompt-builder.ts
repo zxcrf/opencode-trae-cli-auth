@@ -6,6 +6,7 @@ type PromptBuildOptions = {
   maxMessages?: number
   maxToolPayloadChars?: number
   systemPreamble?: string
+  taskReminder?: string
 }
 
 export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buildOptions?: PromptBuildOptions): string {
@@ -21,6 +22,8 @@ export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: Prompt
   for (const message of selectedPrompt) {
     lines.push(serializeMessage(message, includeToolHistory, buildOptions?.maxToolPayloadChars))
   }
+  const taskReminder = pickString(buildOptions?.taskReminder)
+  if (taskReminder) lines.push(formatBlock('Current task reminder', taskReminder))
   const text = lines.filter(Boolean).join('\n\n') || 'Hello'
   return trimPrompt(text, buildOptions?.maxChars)
 }

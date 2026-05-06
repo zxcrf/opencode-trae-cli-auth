@@ -5,23 +5,13 @@ import { discoverTraeModels } from './src/trae-config-models.js'
 import { resolveTraeCliPath } from './src/trae-language-model.js'
 
 type TraePluginOptions = {
-  profile?: 'coding' | 'coding-lite' | 'text' | 'tools'
+  pat?: string
+  allowCliFallback?: boolean
   cliPath?: string
+  openaiBaseURL?: string
+  openaiApiKey?: string
   modelName?: string
-  modelAliases?: Record<string, string>
   enableToolCalling?: boolean
-  queryTimeout?: number
-  includeToolHistory?: boolean
-  maxPromptMessages?: number
-  maxPromptChars?: number
-  maxToolPayloadChars?: number
-  codingSystemPreamble?: string
-  injectCodingSystemPrompt?: boolean
-  enforceTextOnly?: boolean
-  maxRetries?: number
-  retryDelayMs?: number
-  extraArgs?: string[]
-  sessionId?: string
 }
 
 export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}) => {
@@ -35,7 +25,9 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
       config.provider = config.provider ?? {}
       const existing = config.provider.trae ?? {}
       const discoveredModels = discoverTraeModels()
-      const effectiveOptions = withProfileDefaults({ ...(existing.options ?? {}), ...options } as TraePluginOptions)
+      const effectiveOptions = withDefaultOptions(withEnvironmentDefaults({ ...(existing.options ?? {}), ...options } as TraePluginOptions))
+      const pat = normalizePat(effectiveOptions.pat)
+      const rawBaseURL = normalizeTraeRawBaseURL(undefined, pat)
       const mergedModels = applyCapabilityOverrides(
         { ...TRAE_MODELS, ...discoveredModels, ...(existing.models ?? {}) },
         effectiveOptions,
@@ -46,23 +38,14 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
         npm: existing.npm ?? providerFileUrl,
         name: existing.name ?? 'Trae',
         options: {
-          ...(effectiveOptions.cliPath ? { cliPath: effectiveOptions.cliPath } : {}),
-          ...(effectiveOptions.profile ? { profile: effectiveOptions.profile } : {}),
+          allowCliFallback: effectiveOptions.allowCliFallback ?? false,
+          ...(effectiveOptions.allowCliFallback === true && effectiveOptions.cliPath ? { cliPath: effectiveOptions.cliPath } : {}),
+          ...(pat ? { pat } : {}),
+          ...(rawBaseURL ? { traeRawBaseURL: rawBaseURL } : {}),
+          ...(effectiveOptions.openaiBaseURL ? { openaiBaseURL: effectiveOptions.openaiBaseURL } : {}),
+          ...(effectiveOptions.openaiApiKey ? { openaiApiKey: effectiveOptions.openaiApiKey } : {}),
           ...(effectiveOptions.modelName ? { modelName: effectiveOptions.modelName } : {}),
-          ...(typeof effectiveOptions.modelAliases === 'object' && effectiveOptions.modelAliases ? { modelAliases: effectiveOptions.modelAliases } : {}),
           ...(typeof effectiveOptions.enableToolCalling === 'boolean' ? { enableToolCalling: effectiveOptions.enableToolCalling } : {}),
-          ...(typeof effectiveOptions.queryTimeout === 'number' ? { queryTimeout: effectiveOptions.queryTimeout } : {}),
-          ...(typeof effectiveOptions.includeToolHistory === 'boolean' ? { includeToolHistory: effectiveOptions.includeToolHistory } : {}),
-          ...(typeof effectiveOptions.maxPromptMessages === 'number' ? { maxPromptMessages: effectiveOptions.maxPromptMessages } : {}),
-          ...(typeof effectiveOptions.maxPromptChars === 'number' ? { maxPromptChars: effectiveOptions.maxPromptChars } : {}),
-          ...(typeof effectiveOptions.maxToolPayloadChars === 'number' ? { maxToolPayloadChars: effectiveOptions.maxToolPayloadChars } : {}),
-          ...(typeof effectiveOptions.codingSystemPreamble === 'string' ? { codingSystemPreamble: effectiveOptions.codingSystemPreamble } : {}),
-          ...(typeof effectiveOptions.injectCodingSystemPrompt === 'boolean' ? { injectCodingSystemPrompt: effectiveOptions.injectCodingSystemPrompt } : {}),
-          ...(typeof effectiveOptions.enforceTextOnly === 'boolean' ? { enforceTextOnly: effectiveOptions.enforceTextOnly } : {}),
-          ...(typeof effectiveOptions.maxRetries === 'number' ? { maxRetries: effectiveOptions.maxRetries } : {}),
-          ...(typeof effectiveOptions.retryDelayMs === 'number' ? { retryDelayMs: effectiveOptions.retryDelayMs } : {}),
-          ...(Array.isArray(effectiveOptions.extraArgs) ? { extraArgs: effectiveOptions.extraArgs } : {}),
-          ...(typeof effectiveOptions.sessionId === 'string' ? { sessionId: effectiveOptions.sessionId } : {}),
         },
         models: mergedModels,
       }
@@ -94,6 +77,35 @@ export const TraeProviderPlugin: Plugin<TraePluginOptions> = async (options = {}
 
 export default TraeProviderPlugin
 
+function withEnvironmentDefaults(options: TraePluginOptions): TraePluginOptions {
+  return {
+    ...options,
+  }
+}
+
+function normalizePat(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === 'REPLACE_WITH_TRAE_PAT') return undefined
+  return trimmed
+}
+
+function normalizeTraeRawBaseURL(value: string | undefined, pat: string | undefined): string | undefined {
+  if (!value) return pat ? 'https://api.enterprise.trae.cn' : undefined
+  if (pat && stripTrailingSlash(value) === 'https://console.enterprise.trae.cn') {
+    return 'https://api.enterprise.trae.cn'
+  }
+  return value
+}
+
+function isPatLike(value: string | undefined): boolean {
+  return !!normalizePat(value)?.startsWith('trae-lt-')
+}
+
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '')
+}
+
 function applyCapabilityOverrides(
   models: Record<string, TraeModelDefinition>,
   options: TraePluginOptions,
@@ -104,54 +116,9 @@ function applyCapabilityOverrides(
   )
 }
 
-function withProfileDefaults(options: TraePluginOptions): TraePluginOptions {
-  if (options.profile === 'coding') {
-    return {
-      ...options,
-      enableToolCalling: options.enableToolCalling ?? true,
-      includeToolHistory: options.includeToolHistory ?? true,
-      enforceTextOnly: options.enforceTextOnly ?? false,
-      maxPromptMessages: options.maxPromptMessages ?? 60,
-      maxPromptChars: options.maxPromptChars ?? 20000,
-      maxToolPayloadChars: options.maxToolPayloadChars ?? 4000,
-      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? true,
-    }
+function withDefaultOptions(options: TraePluginOptions): TraePluginOptions {
+  return {
+    ...options,
+    enableToolCalling: options.enableToolCalling ?? true,
   }
-  if (options.profile === 'coding-lite' || !options.profile) {
-    return {
-      ...options,
-      enableToolCalling: options.enableToolCalling ?? false,
-      includeToolHistory: options.includeToolHistory ?? false,
-      enforceTextOnly: options.enforceTextOnly ?? true,
-      maxPromptMessages: options.maxPromptMessages ?? 60,
-      maxPromptChars: options.maxPromptChars ?? 20000,
-      maxToolPayloadChars: options.maxToolPayloadChars ?? 3000,
-      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? true,
-    }
-  }
-  if (options.profile === 'tools') {
-    return {
-      ...options,
-      enableToolCalling: options.enableToolCalling ?? true,
-      includeToolHistory: options.includeToolHistory ?? true,
-      enforceTextOnly: options.enforceTextOnly ?? false,
-      maxPromptMessages: options.maxPromptMessages ?? 50,
-      maxPromptChars: options.maxPromptChars ?? 16000,
-      maxToolPayloadChars: options.maxToolPayloadChars ?? 6000,
-      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? true,
-    }
-  }
-  if (options.profile === 'text') {
-    return {
-      ...options,
-      enableToolCalling: options.enableToolCalling ?? false,
-      includeToolHistory: options.includeToolHistory ?? false,
-      enforceTextOnly: options.enforceTextOnly ?? true,
-      maxPromptMessages: options.maxPromptMessages ?? 40,
-      maxPromptChars: options.maxPromptChars ?? 12000,
-      maxToolPayloadChars: options.maxToolPayloadChars ?? 2000,
-      injectCodingSystemPrompt: options.injectCodingSystemPrompt ?? false,
-    }
-  }
-  return options
 }

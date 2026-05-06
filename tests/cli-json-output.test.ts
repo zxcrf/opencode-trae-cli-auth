@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractFunctionToolCalls, parseLastJsonValue } from '../src/cli/json-output.js'
+import { extractFunctionToolCalls, extractTextToolCalls, parseLastJsonValue, stripTextToolCallBlocks } from '../src/cli/json-output.js'
 
 describe('parseLastJsonValue', () => {
   it('parses the last response object from noisy output', () => {
@@ -128,5 +128,108 @@ describe('parseLastJsonValue', () => {
     expect(extractFunctionToolCalls(parsed)).toEqual([
       { id: 'call-new', name: 'glob', input: '{"pattern":"src/**/*"}' },
     ])
+  })
+})
+
+describe('text tool-call protocol', () => {
+  it('extracts explicit OpenCode tool calls from final text', () => {
+    const content = [
+      '<opencode_tool_call>',
+      '{"id":"call-read-1","name":"read","input":{"filePath":"package.json"}}',
+      '</opencode_tool_call>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'call-read-1', name: 'read', input: '{"filePath":"package.json"}' },
+    ])
+  })
+
+  it('supports tool/arguments aliases and deterministic ids', () => {
+    const content = [
+      '<opencode_tool_call>',
+      '{"tool":"grep","arguments":{"pattern":"TODO","glob":"*.ts"}}',
+      '</opencode_tool_call>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'trae-text-tool-0', name: 'grep', input: '{"pattern":"TODO","glob":"*.ts"}' },
+    ])
+  })
+
+  it('extracts Trae XML tool_use blocks', () => {
+    const content = [
+      '<tool_use>',
+      '<server_name>bash</server_name>',
+      '<tool_name>bash</tool_name>',
+      '<input>',
+      '{"command": "ls -la /private/tmp"}',
+      '</input>',
+      '</tool_use>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'trae-text-tool-0', name: 'bash', input: '{"command":"ls -la /private/tmp"}' },
+    ])
+  })
+
+  it('extracts Trae compact tool_call blocks', () => {
+    const content = [
+      '<tool_call>bash</arg_key>command:rtk ls -la',
+      '---',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'trae-text-tool-0', name: 'bash', input: '{"command":"rtk ls -la"}' },
+    ])
+  })
+
+  it('extracts Trae JSON tool_call blocks with a missing opening tag', () => {
+    const content = '{"name": "Bash", "arguments": {"command": "date +%s%N"}}\n</tool_call>'
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'trae-text-tool-0', name: 'Bash', input: '{"command":"date +%s%N"}' },
+    ])
+  })
+
+  it('extracts Trae arguments-only tool_call tails as bash calls', () => {
+    const content = '"arguments": {"command": "date +%s%N"}}\n</tool_call>'
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'trae-text-tool-0', name: 'bash', input: '{"command":"date +%s%N"}' },
+    ])
+  })
+
+  it('strips tool call blocks before emitting assistant text', () => {
+    const content = [
+      'I need to inspect files.',
+      '<opencode_tool_call>',
+      '{"name":"glob","input":{"pattern":"**/package.json"}}',
+      '</opencode_tool_call>',
+    ].join('\n')
+
+    expect(stripTextToolCallBlocks(content)).toBe('I need to inspect files.')
+  })
+
+  it('strips Trae XML tool_use blocks before emitting assistant text', () => {
+    const content = [
+      'I need to inspect files.',
+      '<tool_use>',
+      '<server_name>bash</server_name>',
+      '<tool_name>bash</tool_name>',
+      '<input>{"command": "ls -la"}</input>',
+      '</tool_use>',
+    ].join('\n')
+
+    expect(stripTextToolCallBlocks(content)).toBe('I need to inspect files.')
+  })
+
+  it('strips Trae compact tool_call blocks before emitting assistant text', () => {
+    const content = [
+      'I need to inspect files.',
+      '<tool_call>bash</arg_key>command:rtk ls -la',
+      '---',
+    ].join('\n')
+
+    expect(stripTextToolCallBlocks(content)).toBe('I need to inspect files.')
   })
 })

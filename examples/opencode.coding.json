@@ -1,14 +1,14 @@
 {
+  "default_agent": "build",
   "provider": {
     "trae": {
       "options": {
-        "profile": "coding-lite",
-        "enableToolCalling": false,
-        "includeToolHistory": false,
+        "enableToolCalling": true,
+        "includeToolHistory": true,
         "enforceTextOnly": true,
         "maxPromptMessages": 60,
         "maxPromptChars": 20000,
-        "maxToolPayloadChars": 3000,
+        "maxToolPayloadChars": 4000,
         "maxRetries": 1,
         "retryDelayMs": 800
       }

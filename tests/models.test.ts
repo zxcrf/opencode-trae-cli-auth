@@ -37,6 +37,7 @@ describe('trae models', () => {
       'GLM-5.1',
       'MiniMax-M2.7',
       'Kimi-K2.6',
+      'DeepSeek-V4-Pro',
     ])
     expect(TRAE_CLOUD_MODEL_IDS).toContain('GLM-5.1')
     expect(TRAE_CLOUD_MODEL_IDS).not.toContain('DeepSeek-V3.1-Terminus')
