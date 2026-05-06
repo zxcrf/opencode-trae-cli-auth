@@ -2,6 +2,9 @@ node_modules/
 dist/
 artifacts/
 coverage/
+.opencode/
+scripts/__pycache__/
+docs/superpowers/plans/
 *.tgz
 .DS_Store
 .env
