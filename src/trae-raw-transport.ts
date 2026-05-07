@@ -188,7 +188,7 @@ export async function* streamTraeRawChat(
 }
 
 function findPartialToolBlockStart(text: string): number {
-  const tags = ['<tool_use>', '<tool_call>']
+  const tags = ['<tool_use>', '<tool_call>', '<tool>']
   for (let start = Math.max(0, text.length - '<tool_call>'.length + 1); start < text.length; start += 1) {
     const suffix = text.slice(start)
     if (tags.some((tag) => tag.startsWith(suffix))) return start
@@ -199,15 +199,24 @@ function findPartialToolBlockStart(text: string): number {
 function findToolBlockStart(text: string): number {
   const xmlStart = text.indexOf('<tool_use>')
   const compactStart = text.indexOf('<tool_call>')
-  if (xmlStart < 0) return compactStart
-  if (compactStart < 0) return xmlStart
-  return Math.min(xmlStart, compactStart)
+  const kimiStart = text.indexOf('<tool>')
+  if (xmlStart < 0 && compactStart < 0) return kimiStart
+  if (xmlStart < 0 && kimiStart < 0) return compactStart
+  if (compactStart < 0 && kimiStart < 0) return xmlStart
+  if (xmlStart < 0) return Math.min(compactStart, kimiStart)
+  if (compactStart < 0) return Math.min(xmlStart, kimiStart)
+  if (kimiStart < 0) return Math.min(xmlStart, compactStart)
+  return Math.min(xmlStart, compactStart, kimiStart)
 }
 
 function findToolBlockEnd(text: string, start: number): number {
   if (text.startsWith('<tool_use>', start)) {
     const end = text.indexOf('</tool_use>', start)
     return end < 0 ? -1 : end + '</tool_use>'.length
+  }
+  if (text.startsWith('<tool>', start)) {
+    const end = text.indexOf('</parameter>', start)
+    return end < 0 ? -1 : end + '</parameter>'.length
   }
   const separator = text.indexOf('\n---', start)
   if (separator >= 0) return separator + '\n---'.length

@@ -76,6 +76,7 @@ export type TraeFunctionToolCall = {
 
 const TEXT_TOOL_CALL_RE = /<opencode_tool_call>\s*([\s\S]*?)\s*<\/opencode_tool_call>/gi
 const TRAE_XML_TOOL_CALL_RE = /<tool_use>\s*([\s\S]*?)\s*<\/tool_use>/gi
+const KIMI_TOOL_PARAMETER_RE = /<tool>\s*([^\s<]+)\s*<\/tool>\s*<parameter>\s*([\s\S]*?)\s*<\/parameter>/gi
 const TRAE_COMPACT_TOOL_CALL_RE = /<tool_call>\s*([^\s<]+)\s*<\/arg_key>\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*([\s\S]*?)(?=\n---|\n<tool_call>|$)/gi
 const TRAE_JSON_CLOSE_TOOL_CALL_RE = /(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})\s*<\/tool_call>/gi
 const TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE = /(?<!["A-Za-z0-9_])"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}\s*<\/tool_call>/gi
@@ -119,6 +120,11 @@ export function extractTextToolCalls(content: unknown): TraeFunctionToolCall[] {
     const parsed = parseTraeXmlToolCall(match[1], calls.length)
     if (parsed) calls.push(parsed)
   }
+  KIMI_TOOL_PARAMETER_RE.lastIndex = 0
+  while ((match = KIMI_TOOL_PARAMETER_RE.exec(text))) {
+    const parsed = parseKimiToolParameterCall(match, calls.length)
+    if (parsed) calls.push(parsed)
+  }
   TRAE_COMPACT_TOOL_CALL_RE.lastIndex = 0
   while ((match = TRAE_COMPACT_TOOL_CALL_RE.exec(text))) {
     const parsed = parseTraeCompactToolCall(match, calls.length)
@@ -145,6 +151,7 @@ export function stripTextToolCallBlocks(content: unknown): string {
   return text
     .replace(TEXT_TOOL_CALL_RE, '')
     .replace(TRAE_XML_TOOL_CALL_RE, '')
+    .replace(KIMI_TOOL_PARAMETER_RE, '')
     .replace(TRAE_COMPACT_TOOL_CALL_RE, '')
     .replace(TRAE_JSON_CLOSE_TOOL_CALL_RE, '')
     .replace(TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE, '')
@@ -177,6 +184,17 @@ function parseTraeXmlToolCall(raw: string, index: number): TraeFunctionToolCall 
   return {
     id: `trae-text-tool-${index}`,
     name: toolName,
+    input: normalizeJsonTextInput(input),
+  }
+}
+
+function parseKimiToolParameterCall(match: RegExpExecArray, index: number): TraeFunctionToolCall | undefined {
+  const name = pickNonEmptyString(match[1])
+  const input = pickNonEmptyString(match[2])
+  if (!name || !input) return undefined
+  return {
+    id: `trae-text-tool-${index}`,
+    name,
     input: normalizeJsonTextInput(input),
   }
 }

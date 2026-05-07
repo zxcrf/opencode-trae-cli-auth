@@ -179,6 +179,20 @@ export class TraeLanguageModel implements LanguageModelV2 {
         let lastUsage: LanguageModelV2Usage | undefined
         const selectedModel = resolveTraeModelName(this.modelId, this.providerOptions)
         try {
+          const routedToolCalls = routeCodingToolCalls(options, this.providerOptions)
+          if (routedToolCalls.length > 0) {
+            controller.enqueue({
+              type: 'response-metadata',
+              modelId: selectedModel ?? this.modelId,
+            })
+            const emittedToolCalls = emitToolCalls(controller, routedToolCalls, toolSchemaHints)
+            controller.enqueue({
+              type: 'finish',
+              finishReason: decorateFinishReason(emittedToolCalls > 0 ? 'tool-calls' : 'stop'),
+              usage: zeroUsage(),
+            })
+            return
+          }
           const deterministicToolResultText = (hasTraeRawTransport(this.providerOptions) || hasOpenAITransport(this.providerOptions))
             ? buildDeterministicToolResultFallback(options)
             : undefined
@@ -223,20 +237,6 @@ export class TraeLanguageModel implements LanguageModelV2 {
             throw new Error('Trae provider requires direct raw/OpenAI-compatible transport. Set traeRawBaseURL+traeRawApiKey or openaiBaseURL+openaiApiKey. Legacy traecli fallback is disabled by default.')
           }
           const cliPath = this.providerOptions?.cliPath ?? resolveTraeCliPath()
-          const routedToolCalls = routeCodingToolCalls(options, this.providerOptions)
-          if (routedToolCalls.length > 0) {
-            controller.enqueue({
-              type: 'response-metadata',
-              modelId: selectedModel ?? this.modelId,
-            })
-            emitToolCalls(controller, routedToolCalls, toolSchemaHints)
-            controller.enqueue({
-              type: 'finish',
-              finishReason: decorateFinishReason('tool-calls'),
-              usage: zeroUsage(),
-            })
-            return
-          }
           const fallbackText = buildManifestInventoryFallback(options)
           if (fallbackText) {
             controller.enqueue({
@@ -315,10 +315,10 @@ export class TraeLanguageModel implements LanguageModelV2 {
             const toolCalls = this.providerOptions?.enableToolCalling === true ? extractToolCalls(chunk) : []
             if (toolCalls.length > 0) {
               if (textStarted) controller.enqueue({ type: 'text-end', id: 'trae-0' })
-              emitToolCalls(controller, toolCalls, toolSchemaHints)
+              const emittedToolCalls = emitToolCalls(controller, toolCalls, toolSchemaHints)
               controller.enqueue({
                 type: 'finish',
-                finishReason: decorateFinishReason('tool-calls'),
+                finishReason: decorateFinishReason(emittedToolCalls > 0 ? 'tool-calls' : 'stop'),
                 usage: lastUsage,
               })
               finished = true
@@ -349,10 +349,10 @@ export class TraeLanguageModel implements LanguageModelV2 {
             const finalToolCalls = this.providerOptions?.enableToolCalling === true ? extractToolCalls(result) : []
             if (finalToolCalls.length > 0) {
               if (textStarted) controller.enqueue({ type: 'text-end', id: 'trae-0' })
-              emitToolCalls(controller, finalToolCalls, toolSchemaHints)
+              const emittedToolCalls = emitToolCalls(controller, finalToolCalls, toolSchemaHints)
               controller.enqueue({
                 type: 'finish',
-                finishReason: decorateFinishReason('tool-calls'),
+                finishReason: decorateFinishReason(emittedToolCalls > 0 ? 'tool-calls' : 'stop'),
                 usage: lastUsage ?? mapUsage(result.usage ?? result.message?.response_meta?.usage),
               })
               finished = true
@@ -458,7 +458,7 @@ async function streamTraeRawTransport(args: {
       }
       if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
       if (toolCalls.size > 0) {
-        emitToolCalls(
+        const emittedToolCalls = emitToolCalls(
           args.controller,
           [...toolCalls.values()].map((call) => ({
             id: call.id,
@@ -467,6 +467,7 @@ async function streamTraeRawTransport(args: {
           })),
           args.toolSchemaHints,
         )
+        if (emittedToolCalls === 0) toolCalls.clear()
       }
       args.controller.enqueue({
         type: 'finish',
@@ -514,7 +515,7 @@ async function streamOpenAITransport(args: {
     if (event.type === 'finish') {
       if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
       if (toolCalls.size > 0) {
-        emitToolCalls(
+        const emittedToolCalls = emitToolCalls(
           args.controller,
           [...toolCalls.values()].map((call) => ({
             id: call.id,
@@ -523,6 +524,7 @@ async function streamOpenAITransport(args: {
           })),
           args.toolSchemaHints,
         )
+        if (emittedToolCalls === 0) toolCalls.clear()
       }
       args.controller.enqueue({
         type: 'finish',
@@ -601,10 +603,10 @@ function emitResult(
     controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: part })
   }
   if (parts.length > 0) controller.enqueue({ type: 'text-end', id: 'trae-0' })
-  emitToolCalls(controller, toolCalls, toolSchemaHints)
+  const emittedToolCalls = emitToolCalls(controller, toolCalls, toolSchemaHints)
   controller.enqueue({
     type: 'finish',
-    finishReason: decorateFinishReason(toolCalls.length > 0 ? 'tool-calls' : 'stop'),
+    finishReason: decorateFinishReason(emittedToolCalls > 0 ? 'tool-calls' : 'stop'),
     usage: mapUsage(result.usage ?? result.message?.response_meta?.usage),
   })
 }
@@ -619,10 +621,12 @@ function emitToolCalls(
   controller: ReadableStreamDefaultController<LanguageModelV2StreamPart>,
   toolCalls: ReturnType<typeof extractFunctionToolCalls>,
   toolSchemaHints: Record<string, Set<string>>,
-): void {
+): number {
+  let emitted = 0
   for (const call of toolCalls) {
     const toolName = normalizeToolName(call.name)
     const normalizedInput = normalizeToolInput(toolName, call.input, toolSchemaHints[toolName])
+    if (isBlockedInternalReferenceToolCall(toolName, normalizedInput)) continue
     controller.enqueue({ type: 'tool-input-start', id: call.id, toolName } as LanguageModelV2StreamPart)
     controller.enqueue({ type: 'tool-input-delta', id: call.id, delta: normalizedInput } as LanguageModelV2StreamPart)
     controller.enqueue({ type: 'tool-input-end', id: call.id } as LanguageModelV2StreamPart)
@@ -632,7 +636,17 @@ function emitToolCalls(
       toolName,
       input: normalizedInput,
     } as LanguageModelV2StreamPart)
+    emitted += 1
   }
+  return emitted
+}
+
+function isBlockedInternalReferenceToolCall(toolName: string, input: string): boolean {
+  if (toolName !== 'read') return false
+  const parsed = parseInputObject(input)
+  const filePath = pickString(parsed?.filePath)
+  if (!filePath) return false
+  return isInternalReferencePath(filePath)
 }
 
 function resolveEnforceTextOnly(options?: TraeProviderOptions): boolean | undefined {
@@ -696,11 +710,15 @@ function routeCodingToolCalls(
   if (!userText) return []
   const toolNames = new Set(listToolNames(options.tools))
   const calls: ReturnType<typeof extractFunctionToolCalls> = []
+  const explicitBash = routeExplicitBashExecution(options, toolNames)
+  if (explicitBash.length > 0) return explicitBash
   const contextReads = routeConcreteCodingContextReads(options, toolNames)
   if (contextReads.length > 0) return contextReads
   const manifestReads = routeManifestReadsFromGlobResults(options, toolNames)
   if (manifestReads.length > 0) return manifestReads
   if (hasToolResult(options)) return []
+  const directoryInspection = routeCurrentDirectoryInspection(userText, toolNames)
+  if (directoryInspection.length > 0) return directoryInspection
   if (toolNames.has('bash') && mentionsAllRepoManifests(userText)) {
     calls.push({
       id: 'trae-router-manifest-inventory-0',
@@ -731,6 +749,72 @@ function routeCodingToolCalls(
     }
   }
   return calls
+}
+
+function routeCurrentDirectoryInspection(
+  userText: string,
+  toolNames: Set<string>,
+): ReturnType<typeof extractFunctionToolCalls> {
+  if (!toolNames.has('bash')) return []
+  if (!mentionsCurrentDirectoryInspection(userText)) return []
+  return [{
+    id: 'trae-router-directory-inspection-0',
+    name: 'bash',
+    input: JSON.stringify({
+      command: 'rtk ls -la .',
+      description: 'List current directory contents',
+    }),
+  }]
+}
+
+function mentionsCurrentDirectoryInspection(text: string): boolean {
+  const lower = text.toLowerCase()
+  const mentionsCurrentDirectory = (
+    text.includes('当前目录') ||
+    text.includes('当前文件夹') ||
+    lower.includes('current directory') ||
+    lower.includes('current folder')
+  )
+  if (!mentionsCurrentDirectory) return false
+  return (
+    text.includes('有什么') ||
+    text.includes('有哪些') ||
+    text.includes('评估') ||
+    text.includes('适合做什么') ||
+    lower.includes('what is here') ||
+    lower.includes('list')
+  )
+}
+
+function routeExplicitBashExecution(
+  options: LanguageModelV2CallOptions,
+  toolNames: Set<string>,
+): ReturnType<typeof extractFunctionToolCalls> {
+  if (!toolNames.has('bash')) return []
+  if (hasToolResult(options)) return []
+  const userText = getLastUserText(options)
+  const command = extractExplicitShellCommand(userText)
+  if (!command) return []
+  return [{
+    id: 'trae-router-bash-explicit-0',
+    name: 'bash',
+    input: JSON.stringify({
+      command,
+      description: `Run ${command}`,
+    }),
+  }]
+}
+
+function extractExplicitShellCommand(text: string): string | undefined {
+  const fenced = /(?:命令|command)[:：]\s*`([^`]+)`/i.exec(text)?.[1]
+  if (fenced) return fenced.trim()
+  const plain = /(?:执行命令|命令|command)[:：]\s*([^\n]+)/i.exec(text)?.[1]
+  if (plain) {
+    const trimmed = plain.trim()
+    const cutoff = trimmed.search(/[。！？!?]/u)
+    return (cutoff >= 0 ? trimmed.slice(0, cutoff) : trimmed).trim().replace(/["'`]+$/u, '').trim()
+  }
+  return undefined
 }
 
 function routeConcreteCodingContextReads(
@@ -878,6 +962,7 @@ function collectToolResultsByName(options: LanguageModelV2CallOptions, toolName:
 
 function buildDeterministicToolResultFallback(options: LanguageModelV2CallOptions): string | undefined {
   return buildDirectBashResultFallback(options)
+    ?? buildDirectoryInspectionFallback(options)
     ?? buildManifestInventoryFallback(options)
     ?? buildReadResultFallback(options)
     ?? buildConcreteCodingContextFallback(options)
@@ -899,6 +984,52 @@ function asksForRawToolOutput(text: string): boolean {
     lower.includes('only') ||
     lower.includes('exact output')
   )
+}
+
+function buildDirectoryInspectionFallback(options: LanguageModelV2CallOptions): string | undefined {
+  const results = collectToolResults(options)
+  const output = results.get('trae-router-directory-inspection-0')?.trim()
+  if (!output) return undefined
+  const entries = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('total '))
+  const directories = entries.filter((line) => line.endsWith('/')).slice(0, 12)
+  const files = entries.filter((line) => !line.endsWith('/')).slice(0, 12)
+  const traits = inferDirectoryTraits(entries)
+  return [
+    '基于 OpenCode 工具读取结果，当前目录主要包含：',
+    directories.length ? `目录：${directories.join(', ')}` : '',
+    files.length ? `文件：${files.join(', ')}` : '',
+    '',
+    traits.length ? '适合做的事情：' : '适合做的事情：先补充 README/package.json 等项目入口文件，再做进一步工程化评估。',
+    ...traits.map((trait, index) => `${index + 1}. ${trait}`),
+  ].filter(Boolean).join('\n')
+}
+
+function inferDirectoryTraits(entries: string[]): string[] {
+  const joined = entries.join('\n').toLowerCase()
+  const traits: string[] = []
+  if (/package\.json|bun\.lock|pnpm-lock|npm-/.test(joined)) {
+    traits.push('前端或 Node/Bun 工程整理：检查 package.json、测试脚本、构建脚本和依赖管理。')
+  }
+  if (/\.go$|go\.mod/.test(joined)) {
+    traits.push('Go 服务工程整理：检查模块边界、测试覆盖、构建和发布流程。')
+  }
+  if (/pyproject\.toml|requirements\.txt|\.py$/.test(joined)) {
+    traits.push('Python 工程整理：检查依赖、入口脚本、测试和环境隔离。')
+  }
+  if (/readme\.md|license|changelog/.test(joined)) {
+    traits.push('文档和交付物梳理：整理 README、使用说明、变更记录和许可证信息。')
+  }
+  if (/opencode|trae|mitm|proxy/.test(joined)) {
+    traits.push('AI coding/provider 调试：适合继续验证 OpenCode 工具调用、模型路由和代理抓包结果。')
+  }
+  if (traits.length === 0) {
+    traits.push('目录盘点和清理：先区分源码、临时文件、日志和构建产物，再决定是否拆分成项目仓库。')
+  }
+  return traits.slice(0, 4)
 }
 
 function buildManifestInventoryFallback(options: LanguageModelV2CallOptions): string | undefined {
@@ -1030,7 +1161,13 @@ function parseToolResultFileList(output: string | undefined): string[] {
 function isWorkspaceFileCandidate(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/')
   if (normalized.startsWith('/') || normalized.startsWith('..')) return false
+  if (isInternalReferencePath(normalized)) return false
   return !/(^|\/)(\.git|\.opencode|node_modules|dist|build|coverage)(\/|$)/.test(normalized)
+}
+
+function isInternalReferencePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '')
+  return /^references\/[a-z0-9._-]*tools\.md$/i.test(normalized)
 }
 
 function hasAnyToolCall(options: LanguageModelV2CallOptions, idPrefix: string): boolean {

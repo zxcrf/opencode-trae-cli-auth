@@ -199,6 +199,17 @@ describe('text tool-call protocol', () => {
     ])
   })
 
+  it('extracts Kimi tool + parameter blocks as bash calls', () => {
+    const content = [
+      '<tool>bash</tool>',
+      '<parameter>{"command":"date +%s%N"}</parameter>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'trae-text-tool-0', name: 'bash', input: '{"command":"date +%s%N"}' },
+    ])
+  })
+
   it('strips tool call blocks before emitting assistant text', () => {
     const content = [
       'I need to inspect files.',

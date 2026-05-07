@@ -145,6 +145,7 @@ cliPath: '/usr/bin/traecli',
       openaiBaseURL: 'https://example.test/v1',
       openaiApiKey: 'test-key',
       enableToolCalling: true,
+      modelName: 'GLM-5.1',
     } as any)
 
     const parts: any[] = []
@@ -152,7 +153,7 @@ cliPath: '/usr/bin/traecli',
       inputFormat: 'prompt',
       mode: { type: 'regular' },
       tools: [{ type: 'function', name: 'read', inputSchema: { type: 'object', properties: { filePath: { type: 'string' } } } }],
-      prompt: [{ role: 'user', content: [{ type: 'text', text: 'read package.json' }] }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'inspect the repository config file' }] }],
     } as any)).stream as any) parts.push(part)
 
     expect(spawnMock).not.toHaveBeenCalled()
@@ -282,6 +283,7 @@ cliPath: '/usr/bin/traecli',
     const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
       traeRawBaseURL: 'https://api.enterprise.trae.cn',
       traeRawApiKey: 'test-key',
+      enableToolCalling: true,
     } as any)
 
     for await (const _part of (await model.doStream({
@@ -519,6 +521,43 @@ cliPath: '/usr/bin/traecli',
     expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
       toolName: 'bash',
       input: '{"command":"pwd","description":"Run pwd"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('converts Kimi tool + parameter text into OpenCode tool calls', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"I\\u0027ll run that command for you.\\n\\n<tool>bash","tool_calls":null}\n\n',
+        'event: output\n',
+        'data: {"response":"</tool>\\n<parameter>{\\"command\\": \\"date +%s%N\\"}</parameter>\\n\\n","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('Kimi-K2.6', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'run date' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"date +%s%N","description":"Run date +%s%N"}',
     })
     expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
   })
@@ -1342,6 +1381,36 @@ cliPath: '/usr/bin/traecli',
     expect(parts.at(-1).finishReason).toBe('tool-calls')
   })
 
+  it('routes explicit bash command requests before relying on model-native tool syntax', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: '请必须使用 bash 工具执行命令：date +%s%N。不要猜测，不要解释，只在工具执行后返回完整输出。' }] }],
+      tools: {
+        bash: {
+          type: 'function',
+          description: 'Run shell command',
+          inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } },
+        },
+      },
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"date +%s%N","description":"Run date +%s%N"}',
+    })
+    expect(parts.at(-1).finishReason).toBe('tool-calls')
+  })
+
   it('uses a path-only inventory command for direct package/readme listing requests', async () => {
     const { TraeLanguageModel } = await import('../src/trae-language-model.js')
     const model = new TraeLanguageModel('fast', { allowCliFallback: true, cliPath: '/usr/bin/traecli' })
@@ -2090,7 +2159,7 @@ cliPath: '/usr/bin/traecli',
     })
   })
 
-  it('does not rewrite Superpowers relative reference reads outside the OpenCode workspace', async () => {
+  it('drops internal reference read tool calls that users do not have', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()
     const child = new EventEmitter() as ChildProcessWithoutNullStreams
@@ -2149,12 +2218,141 @@ cliPath: '/usr/bin/traecli',
     const parts: any[] = []
     for await (const part of (await streamPromise).stream as any) parts.push(part)
 
-    const call = parts.find((p) => p.type === 'tool-call')
-    expect(call).toMatchObject({
-      toolCallId: 'call-superpowers-reference',
-      toolName: 'read',
+    expect(parts.find((p) => p.type === 'tool-call')).toBeUndefined()
+    expect(parts.find((p) => p.type === 'tool-input-start')).toBeUndefined()
+    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'stop' })
+  })
+
+  it('drops other internal tool reference read calls', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('coding', {
+      allowCliFallback: true,
+      cliPath: '/usr/bin/traecli',
+      enableToolCalling: true,
     })
-    expect(JSON.parse(call.input).filePath).toBe('references/codex-tools.md')
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: '当前目录下都有什么，请你评估一下适合做什么' }] }],
+      tools: [{
+        type: 'function',
+        name: 'read',
+        inputSchema: { type: 'object', properties: { filePath: { type: 'string' } } },
+      }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.write(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-copilot-reference',
+                    type: 'function',
+                    function: {
+                      name: 'read',
+                      arguments: '{"filePath":"references/copilot-tools.md"}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: '' },
+      }))
+      stderr.end()
+      stdout.end()
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toBeUndefined()
+    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'stop' })
+  })
+
+  it('routes current directory inspection to bash instead of model-invented reference reads', async () => {
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('Kimi-K2.6', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: '当前目录下都有什么，请你评估一下适合做什么' }] }],
+      tools: {
+        bash: {
+          type: 'function',
+          description: 'Run shell command',
+          inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } },
+        },
+        read: {
+          type: 'function',
+          description: 'Read file',
+          inputSchema: { type: 'object', properties: { filePath: { type: 'string' } } },
+        },
+      },
+    } as any)).stream as any) parts.push(part)
+
+    expect(spawnMock).not.toHaveBeenCalled()
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'trae-router-directory-inspection-0',
+      toolName: 'bash',
+      input: '{"command":"rtk ls -la .","description":"List current directory contents"}',
+    })
+    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'tool-calls' })
+  })
+
+  it('summarizes current directory inspection results without asking the model again', async () => {
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('Kimi-K2.6', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [
+        { role: 'user', content: [{ type: 'text', text: '当前目录下都有什么，请你评估一下适合做什么' }] },
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'trae-router-directory-inspection-0', toolName: 'bash', input: { command: 'rtk ls -la .' } }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'trae-router-directory-inspection-0', toolName: 'bash', output: { type: 'text', value: 'package.json  1K\nREADME.md  2K\nsrc/\ntests/\ntrae-mitm/\n' } }] },
+      ],
+      tools: {
+        bash: {
+          type: 'function',
+          description: 'Run shell command',
+          inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } },
+        },
+      },
+    } as any)).stream as any) parts.push(part)
+
+    expect(spawnMock).not.toHaveBeenCalled()
+    const text = parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')
+    expect(text).toContain('基于 OpenCode 工具读取结果')
+    expect(text).toContain('package.json')
+    expect(text).toContain('AI coding/provider 调试')
+    expect(parts.find((p) => p.type === 'tool-call')).toBeUndefined()
+    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'stop' })
   })
 
   it('maps ls tool calls to glob with a safe pattern', async () => {
