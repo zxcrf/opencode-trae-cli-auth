@@ -569,6 +569,44 @@ cliPath: '/usr/bin/traecli',
     expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'stop' })
   })
 
+  it('retries DeepSeek empty tool containers into concrete OpenCode tool calls', async () => {
+    let requestCount = 0
+    const fetchMock = vi.fn(async () => new Response(
+      requestCount++ === 0
+        ? 'event: output\ndata: {"response":"<tool_calls>\\n</tool_calls>","tool_calls":null}\n\n'
+        : 'event: output\ndata: {"response":"<opencode_tool_call>\\n{\\"name\\":\\"bash\\",\\"input\\":{\\"command\\":\\"ls -la /private/tmp\\"}}\\n</opencode_tool_call>","tool_calls":null}\n\n',
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list tmp' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify(JSON.parse(fetchMock.mock.calls[1][1].body).messages)).toContain('Your previous response contained an empty tool container')
+    expect(parts.some((p) => p.type === 'text-delta')).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
   it('stops the raw stream turn after a text tool_use so OpenCode executes the tool', async () => {
     const fetchMock = vi.fn(async () => new Response(
       [

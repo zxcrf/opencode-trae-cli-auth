@@ -434,61 +434,72 @@ async function streamTraeRawTransport(args: {
     modelId: args.selectedModel ?? 'trae',
   })
   let textStarted = false
-  let sawOutput = false
-  let sawRawOutput = false
   const toolCalls = new Map<number, { id: string; name: string; input: string }>()
-  const transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
-  for await (const event of streamTraeRawChat({
-    baseURL: args.providerOptions.traeRawBaseURL!,
-    apiKey: args.providerOptions.traeRawApiKey!,
-    pat: args.providerOptions.pat,
-    headers: args.providerOptions.traeRawHeaders,
-    modelName: args.selectedModel ?? args.providerOptions.modelName,
-    configName: args.providerOptions.traeRawConfigName,
-    rawModelName: args.providerOptions.traeRawModelName,
-    sessionId: args.providerOptions.sessionId,
-    abortSignal: args.options.abortSignal,
-  }, transportOptions)) {
-    if (event.type === 'text-delta') {
-      sawRawOutput = true
-      sawOutput = true
-      if (!textStarted) {
-        args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
-        textStarted = true
+  let attempt = 0
+  let transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
+  while (attempt < 2) {
+    let sawOutput = false
+    let sawRawOutput = false
+    let retried = false
+    for await (const event of streamTraeRawChat({
+      baseURL: args.providerOptions.traeRawBaseURL!,
+      apiKey: args.providerOptions.traeRawApiKey!,
+      pat: args.providerOptions.pat,
+      headers: args.providerOptions.traeRawHeaders,
+      modelName: args.selectedModel ?? args.providerOptions.modelName,
+      configName: args.providerOptions.traeRawConfigName,
+      rawModelName: args.providerOptions.traeRawModelName,
+      sessionId: args.providerOptions.sessionId,
+      abortSignal: args.options.abortSignal,
+    }, transportOptions)) {
+      if (event.type === 'text-delta') {
+        sawRawOutput = true
+        sawOutput = true
+        if (!textStarted) {
+          args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
+          textStarted = true
+        }
+        args.controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: event.delta })
+        continue
       }
-      args.controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: event.delta })
-      continue
-    }
-    if (event.type === 'tool-call-delta') {
-      sawRawOutput = true
-      sawOutput = true
-      applyTraeRawToolDelta(toolCalls, event)
-      continue
-    }
-    if (event.type === 'finish') {
-      if (!sawOutput && !sawRawOutput && event.hadOutput !== true) {
-        throw new Error('Trae raw chat stream ended without text or tool calls')
+      if (event.type === 'tool-call-delta') {
+        sawRawOutput = true
+        sawOutput = true
+        applyTraeRawToolDelta(toolCalls, event)
+        continue
       }
-      if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
-      if (toolCalls.size > 0) {
-        const emittedToolCalls = emitToolCalls(
-          args.controller,
-          [...toolCalls.values()].map((call) => ({
-            id: call.id,
-            name: call.name,
-            input: call.input,
-          })),
-          args.toolSchemaHints,
-        )
-        if (emittedToolCalls === 0) toolCalls.clear()
+      if (event.type === 'finish') {
+        if (!sawOutput && !sawRawOutput && event.hadOutput !== true) {
+          throw new Error('Trae raw chat stream ended without text or tool calls')
+        }
+        if (!sawOutput && toolCalls.size === 0 && event.hadOutput === true && attempt === 0) {
+          transportOptions = withEmptyToolContainerRetryPrompt(transportOptions)
+          retried = true
+          break
+        }
+        if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
+        if (toolCalls.size > 0) {
+          const emittedToolCalls = emitToolCalls(
+            args.controller,
+            [...toolCalls.values()].map((call) => ({
+              id: call.id,
+              name: call.name,
+              input: call.input,
+            })),
+            args.toolSchemaHints,
+          )
+          if (emittedToolCalls === 0) toolCalls.clear()
+        }
+        args.controller.enqueue({
+          type: 'finish',
+          finishReason: decorateFinishReason(toolCalls.size > 0 ? 'tool-calls' : event.finishReason),
+          usage: event.usage ?? zeroUsage(),
+        })
+        return
       }
-      args.controller.enqueue({
-        type: 'finish',
-        finishReason: decorateFinishReason(toolCalls.size > 0 ? 'tool-calls' : event.finishReason),
-        usage: event.usage ?? zeroUsage(),
-      })
-      return
     }
+    if (!retried) break
+    attempt += 1
   }
 }
 
@@ -566,6 +577,23 @@ function withTransportPromptGuidance(
         content: [{ type: 'text', text: `Current task reminder:\n${getFirstUserText(options)}` }],
       },
     ] as LanguageModelV2CallOptions['prompt'],
+  }
+}
+
+function withEmptyToolContainerRetryPrompt(options: LanguageModelV2CallOptions): LanguageModelV2CallOptions {
+  return {
+    ...options,
+    prompt: [
+      {
+        role: 'system',
+        content: [
+          'Your previous response contained an empty tool container such as <tool_calls></tool_calls>.',
+          'Retry now. If you need an OpenCode tool, output exactly one <opencode_tool_call> JSON block with a concrete name and input.',
+          'If no tool is needed, answer directly without any tool container.',
+        ].join(' '),
+      },
+      ...(options.prompt ?? []),
+    ],
   }
 }
 
