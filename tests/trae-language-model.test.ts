@@ -324,6 +324,8 @@ cliPath: '/usr/bin/traecli',
         }],
       },
     ]))
+    expect(JSON.stringify(body.messages)).toContain('Start with the direct answer to the user')
+    expect(JSON.stringify(body.messages)).toContain('Do not use Markdown tables')
     expect(JSON.stringify(body.messages)).not.toContain('Hello')
     expect(parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')).toContain('基于目录输出')
   })

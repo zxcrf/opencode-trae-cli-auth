@@ -572,12 +572,30 @@ function withTransportPromptGuidance(
     prompt: [
       { role: 'system', content: systemPreamble },
       ...(options.prompt ?? []),
+      ...buildPostToolAnswerGuidance(options),
       {
         role: 'user',
         content: [{ type: 'text', text: `Current task reminder:\n${getFirstUserText(options)}` }],
       },
     ] as LanguageModelV2CallOptions['prompt'],
   }
+}
+
+function buildPostToolAnswerGuidance(options: LanguageModelV2CallOptions): LanguageModelV2CallOptions['prompt'] {
+  if (!hasPromptToolResult(options)) return []
+  return [{
+    role: 'system',
+    content: [
+      'Start with the direct answer to the user before summarizing evidence.',
+      'For directory or repository assessment tasks, first state what it is suitable for in 1-3 short bullets, then give a compact contents overview.',
+      'Do not use Markdown tables; they render poorly in terminal UIs.',
+      'Keep the answer concise and do not bury the recommendation after long file listings.',
+    ].join(' '),
+  }]
+}
+
+function hasPromptToolResult(options: LanguageModelV2CallOptions): boolean {
+  return (options.prompt ?? []).some((message) => message.role === 'tool')
 }
 
 function withEmptyToolContainerRetryPrompt(options: LanguageModelV2CallOptions): LanguageModelV2CallOptions {
