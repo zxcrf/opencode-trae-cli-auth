@@ -13,6 +13,13 @@ export function buildPromptFromOptions(options: LanguageModelV2CallOptions, buil
   return buildPrompt(options.prompt, buildOptions)
 }
 
+export function buildToolHistoryPrompt(options: LanguageModelV2CallOptions): string {
+  return buildPromptFromOptions(options, {
+    includeToolHistory: true,
+    maxToolPayloadChars: 4000,
+  })
+}
+
 export function buildPrompt(prompt: LanguageModelV2Prompt, buildOptions?: PromptBuildOptions): string {
   const selectedPrompt = trimMessages(prompt, buildOptions?.maxMessages)
   const lines: string[] = []

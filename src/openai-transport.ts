@@ -1,6 +1,6 @@
 import type { LanguageModelV2CallOptions, LanguageModelV2Usage } from '@ai-sdk/provider'
 
-import { buildPromptFromOptions } from './prompt-builder.js'
+import { buildPromptFromOptions, buildToolHistoryPrompt } from './prompt-builder.js'
 import { contentToText } from './cli/text-content.js'
 import { mapUsage } from './cli/usage.js'
 
@@ -118,7 +118,7 @@ function buildOpenAIMessages(options: LanguageModelV2CallOptions): Array<{ role:
       continue
     }
     if (message.role === 'tool') {
-      const content = buildPromptFromOptions({ ...options, prompt: [message] })
+      const content = buildToolHistoryPrompt({ ...options, prompt: [message] })
       if (content) messages.push({ role: 'user', content })
     }
   }

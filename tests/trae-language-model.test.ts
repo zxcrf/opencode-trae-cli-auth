@@ -169,6 +169,47 @@ cliPath: '/usr/bin/traecli',
     expect(parts.find((p) => p.type === 'finish').finishReason).toBe('tool-calls')
   })
 
+  it('sends OpenCode tool results back through OpenAI-compatible messages', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'data: {"choices":[{"delta":{"content":"done"}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        'data: [DONE]\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('coding', {
+      openaiBaseURL: 'https://example.test/v1',
+      openaiApiKey: 'test-key',
+      enableToolCalling: true,
+      modelName: 'GLM-5.1',
+    } as any)
+
+    for await (const _part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [
+        { role: 'user', content: [{ type: 'text', text: 'use ls result to answer' }] },
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'call-bash', toolName: 'bash', input: { command: 'ls' } }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'call-bash', toolName: 'bash', output: { type: 'text', value: 'README.md\nsrc/\n' } }] },
+      ],
+    } as any)).stream as any) {
+      // drain stream
+    }
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.messages).toEqual(expect.arrayContaining([
+      { role: 'user', content: expect.stringContaining('Tool result [call-bash] bash:\nREADME.md\nsrc/') },
+    ]))
+    expect(JSON.stringify(body.messages)).not.toContain('Hello')
+  })
+
   it('uses Trae raw chat SSE transport when configured', async () => {
     const fetchMock = vi.fn(async () => new Response(
       [
@@ -231,6 +272,49 @@ cliPath: '/usr/bin/traecli',
       outputTokens: 2,
       totalTokens: 5,
     })
+  })
+
+  it('sends OpenCode tool results back to Trae raw chat instead of an empty fallback prompt', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      'event: output\ndata: {"response":"基于目录输出，可以继续做临时目录清理和项目识别。","tool_calls":null}\n\n',
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('GLM-5.1', {
+      traeRawBaseURL: 'https://console.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [
+        { role: 'user', content: [{ type: 'text', text: '当前目录下都有什么，请你评估一下适合做什么' }] },
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'call-bash', toolName: 'bash', input: { command: 'rtk ls -la /private/tmp/' } }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'call-bash', toolName: 'bash', output: { type: 'text', value: 'opencode/\ntrae-mitm/\npackage.json\n' } }] },
+      ],
+    } as any)).stream as any) parts.push(part)
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.messages).toEqual(expect.arrayContaining([
+      { role: 'user', content: [{ type: 'text', text: '当前目录下都有什么，请你评估一下适合做什么' }] },
+      {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: expect.stringContaining('Tool result [call-bash] bash:\nopencode/\ntrae-mitm/\npackage.json'),
+        }],
+      },
+    ]))
+    expect(JSON.stringify(body.messages)).not.toContain('Hello')
+    expect(parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')).toContain('基于目录输出')
   })
 
   it('maps Kimi-K2.6 to the raw Trae model identifiers', async () => {

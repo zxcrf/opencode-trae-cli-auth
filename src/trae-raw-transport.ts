@@ -1,7 +1,7 @@
 import type { LanguageModelV2CallOptions, LanguageModelV2Usage } from '@ai-sdk/provider'
 import { randomUUID } from 'node:crypto'
 
-import { buildPromptFromOptions } from './prompt-builder.js'
+import { buildPromptFromOptions, buildToolHistoryPrompt } from './prompt-builder.js'
 import { contentToText } from './cli/text-content.js'
 import { mapUsage } from './cli/usage.js'
 import { resolveTraeAuthToken } from './trae-auth.js'
@@ -249,7 +249,7 @@ function buildTraeRawMessages(options: LanguageModelV2CallOptions): Array<{ role
       return text ? [{ role: message.role, content: [{ type: 'text' as const, text }] }] : []
     }
     if (message.role === 'tool') {
-      const text = buildPromptFromOptions({ ...options, prompt: [message] })
+      const text = buildToolHistoryPrompt({ ...options, prompt: [message] })
       return text ? [{ role: 'user', content: [{ type: 'text' as const, text }] }] : []
     }
     return []
