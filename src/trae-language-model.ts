@@ -427,6 +427,7 @@ async function streamTraeRawTransport(args: {
   let textStarted = false
   let sawOutput = false
   const toolCalls = new Map<number, { id: string; name: string; input: string }>()
+  const transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
   for await (const event of streamTraeRawChat({
     baseURL: args.providerOptions.traeRawBaseURL!,
     apiKey: args.providerOptions.traeRawApiKey!,
@@ -437,7 +438,7 @@ async function streamTraeRawTransport(args: {
     rawModelName: args.providerOptions.traeRawModelName,
     sessionId: args.providerOptions.sessionId,
     abortSignal: args.options.abortSignal,
-  }, args.options)) {
+  }, transportOptions)) {
     if (event.type === 'text-delta') {
       sawOutput = true
       if (!textStarted) {
@@ -493,13 +494,14 @@ async function streamOpenAITransport(args: {
   })
   let textStarted = false
   const toolCalls = new Map<number, { id: string; name: string; input: string }>()
+  const transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
   for await (const event of streamOpenAIChatCompletions({
     baseURL: args.providerOptions.openaiBaseURL!,
     apiKey: args.providerOptions.openaiApiKey!,
     headers: args.providerOptions.openaiHeaders,
     modelName: args.selectedModel ?? args.providerOptions.modelName ?? stripProviderPrefix(args.modelId),
     abortSignal: args.options.abortSignal,
-  }, args.options)) {
+  }, transportOptions)) {
     if (event.type === 'text-delta') {
       if (!textStarted) {
         args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
@@ -533,6 +535,25 @@ async function streamOpenAITransport(args: {
       })
       return
     }
+  }
+}
+
+function withTransportPromptGuidance(
+  options: LanguageModelV2CallOptions,
+  providerOptions: TraeProviderOptions,
+): LanguageModelV2CallOptions {
+  const systemPreamble = resolveSystemPreamble(providerOptions, options.tools)
+  if (!systemPreamble) return options
+  return {
+    ...options,
+    prompt: [
+      { role: 'system', content: systemPreamble },
+      ...(options.prompt ?? []),
+      {
+        role: 'user',
+        content: [{ type: 'text', text: `Current task reminder:\n${getFirstUserText(options)}` }],
+      },
+    ] as LanguageModelV2CallOptions['prompt'],
   }
 }
 

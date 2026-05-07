@@ -210,6 +210,86 @@ describe('text tool-call protocol', () => {
     ])
   })
 
+  it('extracts Kimi invoke parameter blocks as tool calls', () => {
+    const content = '我来查看当前目录。bash\nls -la /private/tmp\n</invoke>bash<parameter=command>ls -la /private/tmp</parameter></invoke>'
+
+    expect(extractTextToolCalls(content)).toEqual([
+      { id: 'trae-text-tool-0', name: 'bash', input: '{"command":"ls -la /private/tmp"}' },
+    ])
+    expect(stripTextToolCallBlocks(content)).toBe('我来查看当前目录。bash\nls -la /private/tmp\n</invoke>')
+  })
+
+  it('extracts Trae tool_cell blocks as tool calls', () => {
+    const content = [
+      '<tool_cell name="Bash">',
+      '<arg name="command">ls -la /private/tmp</arg>',
+      '<arg name="description">List contents of /private/tmp</arg>',
+      '</tool_cell>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      {
+        id: 'trae-text-tool-0',
+        name: 'Bash',
+        input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+      },
+    ])
+    expect(stripTextToolCallBlocks(content)).toBe('')
+  })
+
+  it('extracts Trae tool_cell blocks with JSON bodies', () => {
+    const content = [
+      '<tool_cell name="Bash">',
+      '{"command": "ls -la /private/tmp", "description": "List contents of /private/tmp"}',
+      '</tool_cell>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      {
+        id: 'trae-text-tool-0',
+        name: 'Bash',
+        input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+      },
+    ])
+    expect(stripTextToolCallBlocks(content)).toBe('')
+  })
+
+  it('extracts named XML tool_call blocks as tool calls', () => {
+    const content = [
+      '<tool_call name="Bash">',
+      '<command>ls -la /private/tmp</command>',
+      '<description>List contents of /private/tmp</description>',
+      '</tool_call>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      {
+        id: 'trae-text-tool-0',
+        name: 'Bash',
+        input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+      },
+    ])
+    expect(stripTextToolCallBlocks(content)).toBe('')
+  })
+
+  it('extracts named XML tool_call blocks with named parameter tags', () => {
+    const content = [
+      '<tool_call name="Bash">',
+      '<parameter name="command" string="true">ls -la /private/tmp</parameter>',
+      '<parameter name="description" string="true">List contents of /private/tmp</parameter>',
+      '</tool_call>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      {
+        id: 'trae-text-tool-0',
+        name: 'Bash',
+        input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+      },
+    ])
+    expect(stripTextToolCallBlocks(content)).toBe('')
+  })
+
   it('strips tool call blocks before emitting assistant text', () => {
     const content = [
       'I need to inspect files.',

@@ -76,7 +76,10 @@ export type TraeFunctionToolCall = {
 
 const TEXT_TOOL_CALL_RE = /<opencode_tool_call>\s*([\s\S]*?)\s*<\/opencode_tool_call>/gi
 const TRAE_XML_TOOL_CALL_RE = /<tool_use>\s*([\s\S]*?)\s*<\/tool_use>/gi
+const TRAE_TOOL_CELL_RE = /<tool_cell\s+name=["']([^"']+)["']\s*>\s*([\s\S]*?)\s*<\/tool_cell>/gi
+const NAMED_TOOL_CALL_RE = /<tool_call\s+name=["']([^"']+)["']\s*>\s*([\s\S]*?)\s*<\/tool_call>/gi
 const KIMI_TOOL_PARAMETER_RE = /<tool>\s*([^\s<]+)\s*<\/tool>\s*<parameter>\s*([\s\S]*?)\s*<\/parameter>/gi
+const KIMI_INVOKE_PARAMETER_RE = /(?:<invoke>\s*)?([A-Za-z_][A-Za-z0-9_-]*)\s*<parameter=([A-Za-z_][A-Za-z0-9_-]*)>\s*([\s\S]*?)\s*<\/parameter>\s*<\/invoke>/gi
 const TRAE_COMPACT_TOOL_CALL_RE = /<tool_call>\s*([^\s<]+)\s*<\/arg_key>\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*([\s\S]*?)(?=\n---|\n<tool_call>|$)/gi
 const TRAE_JSON_CLOSE_TOOL_CALL_RE = /(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})\s*<\/tool_call>/gi
 const TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE = /(?<!["A-Za-z0-9_])"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}\s*<\/tool_call>/gi
@@ -120,9 +123,24 @@ export function extractTextToolCalls(content: unknown): TraeFunctionToolCall[] {
     const parsed = parseTraeXmlToolCall(match[1], calls.length)
     if (parsed) calls.push(parsed)
   }
+  TRAE_TOOL_CELL_RE.lastIndex = 0
+  while ((match = TRAE_TOOL_CELL_RE.exec(text))) {
+    const parsed = parseTraeToolCellCall(match, calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  NAMED_TOOL_CALL_RE.lastIndex = 0
+  while ((match = NAMED_TOOL_CALL_RE.exec(text))) {
+    const parsed = parseNamedXmlToolCall(match, calls.length)
+    if (parsed) calls.push(parsed)
+  }
   KIMI_TOOL_PARAMETER_RE.lastIndex = 0
   while ((match = KIMI_TOOL_PARAMETER_RE.exec(text))) {
     const parsed = parseKimiToolParameterCall(match, calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  KIMI_INVOKE_PARAMETER_RE.lastIndex = 0
+  while ((match = KIMI_INVOKE_PARAMETER_RE.exec(text))) {
+    const parsed = parseKimiInvokeParameterCall(match, calls.length)
     if (parsed) calls.push(parsed)
   }
   TRAE_COMPACT_TOOL_CALL_RE.lastIndex = 0
@@ -151,12 +169,92 @@ export function stripTextToolCallBlocks(content: unknown): string {
   return text
     .replace(TEXT_TOOL_CALL_RE, '')
     .replace(TRAE_XML_TOOL_CALL_RE, '')
+    .replace(TRAE_TOOL_CELL_RE, '')
+    .replace(NAMED_TOOL_CALL_RE, '')
     .replace(KIMI_TOOL_PARAMETER_RE, '')
+    .replace(KIMI_INVOKE_PARAMETER_RE, '')
     .replace(TRAE_COMPACT_TOOL_CALL_RE, '')
     .replace(TRAE_JSON_CLOSE_TOOL_CALL_RE, '')
     .replace(TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE, '')
     .replace(/^\s*---\s*$/gm, '')
     .trim()
+}
+
+function parseKimiInvokeParameterCall(match: RegExpExecArray, index: number): TraeFunctionToolCall | undefined {
+  const name = pickNonEmptyString(match[1])
+  const key = pickNonEmptyString(match[2])
+  const value = pickNonEmptyString(match[3])
+  if (!name || !key || !value) return undefined
+  return {
+    id: `trae-text-tool-${index}`,
+    name,
+    input: JSON.stringify({ [key]: value }),
+  }
+}
+
+function parseNamedXmlToolCall(match: RegExpExecArray, index: number): TraeFunctionToolCall | undefined {
+  const name = pickNonEmptyString(match[1])
+  const raw = pickNonEmptyString(match[2])
+  if (!name || !raw) return undefined
+  const input: Record<string, string> = {}
+  const tagRe = /<([A-Za-z_][A-Za-z0-9_-]*)>\s*([\s\S]*?)\s*<\/\1>/gi
+  let tagMatch: RegExpExecArray | null
+  while ((tagMatch = tagRe.exec(raw))) {
+    const key = pickNonEmptyString(tagMatch[1])
+    const value = pickNonEmptyString(tagMatch[2])
+    if (key && value) input[key] = value
+  }
+  const parameterRe = /<parameter\b[^>]*\bname=["']([^"']+)["'][^>]*>\s*([\s\S]*?)\s*<\/parameter>/gi
+  let parameterMatch: RegExpExecArray | null
+  while ((parameterMatch = parameterRe.exec(raw))) {
+    const key = pickNonEmptyString(parameterMatch[1])
+    const value = pickNonEmptyString(parameterMatch[2])
+    if (key && value) input[key] = value
+  }
+  return {
+    id: `trae-text-tool-${index}`,
+    name,
+    input: stringifyToolInput(input),
+  }
+}
+
+function parseTraeToolCellCall(match: RegExpExecArray, index: number): TraeFunctionToolCall | undefined {
+  const name = pickNonEmptyString(match[1])
+  const raw = pickNonEmptyString(match[2])
+  if (!name || !raw) return undefined
+  const input: Record<string, string> = {}
+  const argRe = /<arg\s+name=["']([^"']+)["']\s*>\s*([\s\S]*?)\s*<\/arg>/gi
+  let argMatch: RegExpExecArray | null
+  while ((argMatch = argRe.exec(raw))) {
+    const key = pickNonEmptyString(argMatch[1])
+    const value = pickNonEmptyString(argMatch[2])
+    if (key && value) input[key] = value
+  }
+  if (Object.keys(input).length === 0) {
+    const jsonInput = parseJsonToolInput(raw)
+    if (jsonInput) {
+      return {
+        id: `trae-text-tool-${index}`,
+        name,
+        input: jsonInput,
+      }
+    }
+  }
+  return {
+    id: `trae-text-tool-${index}`,
+    name,
+    input: stringifyToolInput(input),
+  }
+}
+
+function parseJsonToolInput(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw.trim())
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    return JSON.stringify(parsed)
+  } catch {
+    return undefined
+  }
 }
 
 function parseTextToolCall(raw: string, index: number): TraeFunctionToolCall | undefined {

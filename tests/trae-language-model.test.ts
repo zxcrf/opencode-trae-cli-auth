@@ -264,8 +264,19 @@ cliPath: '/usr/bin/traecli',
       config_name: 'glm-5.1',
       model_name: 'glm-5__v2',
       session_id: expect.any(String),
-      messages: [{ role: 'user' }],
     })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.messages).toEqual(expect.arrayContaining([
+      {
+        role: 'system',
+        content: [{ type: 'text', text: expect.stringContaining('OpenCode executes all filesystem') }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'ping' }],
+      },
+    ]))
+    expect(JSON.stringify(body.messages)).toContain('<opencode_tool_call>')
     expect(parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')).toBe('hello')
     expect(parts.find((p) => p.type === 'finish').usage).toMatchObject({
       inputTokens: 3,
@@ -642,6 +653,260 @@ cliPath: '/usr/bin/traecli',
     expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
       toolName: 'bash',
       input: '{"command":"date +%s%N","description":"Run date +%s%N"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('converts streamed OpenCode tool-call blocks into OpenCode tool calls', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"<opencode_tool_call>\\n{\\"id\\":\\"call-1\\",\\"name\\":\\"bash\\",\\"input\\":{\\"command\\":\\"ls -la /private/tmp\\"}}\\n</opencode_tool_call>","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('Kimi-K2.6', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list current directory' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.some((p) => p.type === 'text-delta' && String(p.delta).includes('<opencode_tool_call'))).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp","description":"Run ls -la /private/tmp"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('converts Kimi invoke parameter text into OpenCode tool calls', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"我来查看当前目录。bash\\nls -la /private/tmp\\n</invoke>bash<parameter=command>ls -la /private/tmp</parameter></invoke>","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('Kimi-K2.6', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list current directory' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp","description":"Run ls -la /private/tmp"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('converts DeepSeek tool_cell text into OpenCode tool calls', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"<tool_cell name=\\"Bash\\">\\n<arg name=\\"command\\">ls -la /private/tmp</arg>\\n","tool_calls":null}\n\n',
+        'event: output\n',
+        'data: {"response":"<arg name=\\"description\\">List contents of /private/tmp</arg>\\n</tool_cell>","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list current directory' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.some((p) => p.type === 'text-delta' && String(p.delta).includes('<tool_cell'))).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('converts DeepSeek tool_cell JSON bodies into OpenCode tool calls', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"<tool_cell name=\\"Bash\\">\\n{\\"command\\": \\"ls -la /private/tmp\\", \\"description\\": \\"List contents of /private/tmp\\"}\\n</tool_cell>","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list current directory' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.some((p) => p.type === 'text-delta' && String(p.delta).includes('<tool_cell'))).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('converts named XML tool_call text into OpenCode tool calls', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"<tool_call name=\\"Bash\\">\\n<command>ls -la /private/tmp</command>\\n<description>List contents of /private/tmp</description>\\n</tool_call>","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list current directory' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.some((p) => p.type === 'text-delta' && String(p.delta).includes('<tool_call'))).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('converts named XML tool_call parameter tags into OpenCode tool calls', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"<tool_call name=\\"Bash\\">\\n<parameter name=\\"command\\" string=\\"true\\">ls -la /private/tmp</parameter>\\n<parameter name=\\"description\\" string=\\"true\\">List contents of /private/tmp</parameter>\\n</tool_call>","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list current directory' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.some((p) => p.type === 'text-delta' && String(p.delta).includes('<tool_call'))).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('flushes a pending XML tool_call when the raw stream ends', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      [
+        'event: output\n',
+        'data: {"response":"<tool_call name=\\"Bash\\">\\n<parameter name=\\"command\\">ls -la /private/tmp</parameter>\\n<parameter name=\\"description\\">List contents of /private/tmp</parameter>\\n</tool_call>","tool_calls":null}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list current directory' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'error')).toBeUndefined()
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"ls -la /private/tmp","description":"List contents of /private/tmp"}',
     })
     expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
   })

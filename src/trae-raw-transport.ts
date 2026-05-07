@@ -102,6 +102,17 @@ export async function* streamTraeRawChat(
   let finishReason: TraeRawStreamFinish['finishReason'] = 'stop'
   let pendingToolText = ''
   let emittedExternalToolCall = false
+  const mapTextToolCall = (toolCall: { id: string; name: string; input: string }): TraeRawStreamToolDelta => {
+    finishReason = 'tool-calls'
+    return {
+      type: 'tool-call-delta',
+      index: 0,
+      id: toolCall.id,
+      name: toolCall.name,
+      argumentsDelta: toolCall.input,
+    }
+  }
+
   for await (const frame of parseSseFrames(response.body)) {
     if (frame.event === 'error') {
       throw new Error(formatTraeRawError(frame.data))
@@ -116,16 +127,7 @@ export async function* streamTraeRawChat(
     const responseText = typeof frame.data.response === 'string' ? frame.data.response : ''
     const delta = nextTextDelta(emittedText, responseText)
     if (delta) {
-      const textDelta = consumeTextDeltaForToolCalls(delta, (toolCall) => {
-        finishReason = 'tool-calls'
-        return {
-          type: 'tool-call-delta',
-          index: 0,
-          id: toolCall.id,
-          name: toolCall.name,
-          argumentsDelta: toolCall.input,
-        } satisfies TraeRawStreamToolDelta
-      })
+      const textDelta = consumeTextDeltaForToolCalls(delta, mapTextToolCall)
       pendingToolText = textDelta.pendingToolText
       for (const toolDelta of textDelta.toolDeltas) yield toolDelta
       if (textDelta.toolDeltas.length > 0) emittedExternalToolCall = true
@@ -143,6 +145,14 @@ export async function* streamTraeRawChat(
         yield delta
       }
     }
+  }
+
+  if (!emittedExternalToolCall && pendingToolText) {
+    const textDelta = consumeTextDeltaForToolCalls('', mapTextToolCall)
+    pendingToolText = textDelta.pendingToolText
+    for (const toolDelta of textDelta.toolDeltas) yield toolDelta
+    if (textDelta.toolDeltas.length > 0) emittedExternalToolCall = true
+    if (textDelta.text) yield { type: 'text-delta', delta: textDelta.text }
   }
 
   yield { type: 'finish', finishReason, usage: finalUsage }
@@ -188,8 +198,9 @@ export async function* streamTraeRawChat(
 }
 
 function findPartialToolBlockStart(text: string): number {
-  const tags = ['<tool_use>', '<tool_call>', '<tool>']
-  for (let start = Math.max(0, text.length - '<tool_call>'.length + 1); start < text.length; start += 1) {
+  const tags = ['<opencode_tool_call>', '<tool_use>', '<tool_call>', '<tool_call ', '<tool>', '<tool_cell', '<invoke>', '</invoke>']
+  const maxTagLength = Math.max(...tags.map((tag) => tag.length))
+  for (let start = Math.max(0, text.length - maxTagLength + 1); start < text.length; start += 1) {
     const suffix = text.slice(start)
     if (tags.some((tag) => tag.startsWith(suffix))) return start
   }
@@ -198,18 +209,33 @@ function findPartialToolBlockStart(text: string): number {
 
 function findToolBlockStart(text: string): number {
   const xmlStart = text.indexOf('<tool_use>')
+  const opencodeStart = text.indexOf('<opencode_tool_call>')
   const compactStart = text.indexOf('<tool_call>')
+  const namedStart = text.indexOf('<tool_call ')
   const kimiStart = text.indexOf('<tool>')
-  if (xmlStart < 0 && compactStart < 0) return kimiStart
-  if (xmlStart < 0 && kimiStart < 0) return compactStart
-  if (compactStart < 0 && kimiStart < 0) return xmlStart
-  if (xmlStart < 0) return Math.min(compactStart, kimiStart)
-  if (compactStart < 0) return Math.min(xmlStart, kimiStart)
-  if (kimiStart < 0) return Math.min(xmlStart, compactStart)
-  return Math.min(xmlStart, compactStart, kimiStart)
+  const toolCellStart = text.indexOf('<tool_cell')
+  const invokeStart = text.indexOf('<invoke>')
+  const brokenInvokeStart = text.indexOf('</invoke>')
+  return minFound(opencodeStart, xmlStart, compactStart, namedStart, kimiStart, toolCellStart, invokeStart, brokenInvokeStart)
 }
 
 function findToolBlockEnd(text: string, start: number): number {
+  if (text.startsWith('<opencode_tool_call>', start)) {
+    const end = text.indexOf('</opencode_tool_call>', start)
+    return end < 0 ? -1 : end + '</opencode_tool_call>'.length
+  }
+  if (text.startsWith('</invoke>', start)) {
+    const end = text.indexOf('</invoke>', start + '</invoke>'.length)
+    return end < 0 ? -1 : end + '</invoke>'.length
+  }
+  if (text.startsWith('<invoke>', start)) {
+    const end = text.indexOf('</invoke>', start)
+    return end < 0 ? -1 : end + '</invoke>'.length
+  }
+  if (text.startsWith('<tool_call ', start)) {
+    const end = text.indexOf('</tool_call>', start)
+    return end < 0 ? -1 : end + '</tool_call>'.length
+  }
   if (text.startsWith('<tool_use>', start)) {
     const end = text.indexOf('</tool_use>', start)
     return end < 0 ? -1 : end + '</tool_use>'.length
@@ -218,11 +244,20 @@ function findToolBlockEnd(text: string, start: number): number {
     const end = text.indexOf('</parameter>', start)
     return end < 0 ? -1 : end + '</parameter>'.length
   }
+  if (text.startsWith('<tool_cell', start)) {
+    const end = text.indexOf('</tool_cell>', start)
+    return end < 0 ? -1 : end + '</tool_cell>'.length
+  }
   const separator = text.indexOf('\n---', start)
   if (separator >= 0) return separator + '\n---'.length
   const nextTool = text.indexOf('\n<tool_call>', start + '<tool_call>'.length)
   if (nextTool >= 0) return nextTool
   return text.length
+}
+
+function minFound(...values: number[]): number {
+  const found = values.filter((value) => value >= 0)
+  return found.length ? Math.min(...found) : -1
 }
 
 function formatTraeRawError(data: Record<string, unknown> | undefined): string {
