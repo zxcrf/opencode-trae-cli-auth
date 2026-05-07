@@ -1830,6 +1830,43 @@ cliPath: '/usr/bin/traecli',
     expect(parts.at(-1).finishReason).toBe('tool-calls')
   })
 
+  it('routes project scaffolding requests to OpenCode bash instead of stopping after a plan', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('GLM-5.1', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [
+        { role: 'user', content: [{ type: 'text', text: '初始化一个next.js+prisma+react的工程' }] },
+        { role: 'assistant', content: [{ type: 'text', text: '在开始之前，先确认几个关键选择：数据库、路由模式、项目用途。' }] },
+        { role: 'user', content: [{ type: 'text', text: '1. sqlite\n2. App router\n3. 博客' }] },
+      ],
+      tools: {
+        bash: {
+          type: 'function',
+          description: 'Run shell command',
+          inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' }, timeout: { type: 'number' } } },
+        },
+      },
+    } as any)).stream as any) parts.push(part)
+
+    const call = parts.find((p) => p.type === 'tool-call')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(call).toMatchObject({ toolName: 'bash' })
+    const input = JSON.parse(call.input)
+    expect(input.command).toContain('create-next-app')
+    expect(input.command).toContain('prisma')
+    expect(input.command).toContain('sqlite')
+    expect(parts.at(-1).finishReason).toBe('tool-calls')
+  })
+
   it('uses a path-only inventory command for direct package/readme listing requests', async () => {
     const { TraeLanguageModel } = await import('../src/trae-language-model.js')
     const model = new TraeLanguageModel('fast', { allowCliFallback: true, cliPath: '/usr/bin/traecli' })
@@ -1948,44 +1985,6 @@ cliPath: '/usr/bin/traecli',
       { filePath: 'tests/trae-language-model.test.ts', limit: 240 },
       { filePath: 'tests/prompt-builder.test.ts', limit: 240 },
     ])
-  })
-
-  it('does not call Trae again when test file inventory is empty', async () => {
-    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
-    const model = new TraeLanguageModel('coding', { allowCliFallback: true, cliPath: '/usr/bin/traecli', includeToolHistory: true })
-
-    const parts: any[] = []
-    for await (const part of (await model.doStream({
-      inputFormat: 'prompt',
-      mode: { type: 'regular' },
-      prompt: [
-        {
-          role: 'user',
-          content: [{
-            type: 'text',
-            text: [
-              '请以 TDD 方式修复一个真实工程问题：',
-              '当前 provider 的 package.json 里仍然有 npm lifecycle script。',
-              '请先阅读 package.json、README.md、tests 目录，确认现有约定。',
-              '将 prepack/prepublishOnly 改为 bun 入口，并补充测试。',
-            ].join('\n'),
-          }],
-        },
-        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'trae-router-context-find-tests', toolName: 'bash', input: { command: 'find tests' } }] },
-        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'trae-router-context-find-tests', toolName: 'bash', output: { type: 'text', value: '' } }] },
-      ],
-      tools: {
-        read: {
-          type: 'function',
-          description: 'Read file',
-          inputSchema: { type: 'object', properties: { filePath: { type: 'string' }, limit: { type: 'number' } } },
-        },
-      },
-    } as any)).stream as any) parts.push(part)
-
-    expect(spawnMock).not.toHaveBeenCalled()
-    expect(parts.filter((p) => p.type === 'tool-call')).toHaveLength(0)
-    expect(parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')).toContain('未发现测试文件')
   })
 
   it('prefers the actual user-requested file over injected instruction file paths', async () => {
@@ -2138,7 +2137,7 @@ cliPath: '/usr/bin/traecli',
     expect(parts.at(-1).finishReason).toBe('tool-calls')
   })
 
-  it('does not deterministic-route after OpenCode has returned tool results', async () => {
+  it('passes OpenCode tool results back to the model instead of fabricating a read answer', async () => {
     const { TraeLanguageModel } = await import('../src/trae-language-model.js')
     const model = new TraeLanguageModel('trae/coding', {
 allowCliFallback: true,
@@ -2160,12 +2159,11 @@ cliPath: '/usr/bin/traecli',
     const parts: any[] = []
     for await (const part of (await streamPromise).stream as any) parts.push(part)
 
-    expect(spawnMock).not.toHaveBeenCalled()
+    expect(spawnMock).toHaveBeenCalled()
     expect(parts.filter((p) => p.type === 'tool-call')).toHaveLength(0)
-    expect(parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')).toBe('scripts.test 是 vitest run')
   })
 
-  it('falls back to real tool output when Trae times out after a read result', async () => {
+  it('surfaces model timeout errors after tool results instead of fabricating fallback text', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()
     const child = new EventEmitter() as ChildProcessWithoutNullStreams
@@ -2195,128 +2193,8 @@ cliPath: '/usr/bin/traecli',
 
     expect(spawnMock).toHaveBeenCalled()
     expect(child.kill).toHaveBeenCalled()
-    expect(parts.filter((p) => p.type === 'error')).toHaveLength(0)
-    const text = parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')
-    expect(text).toContain('Trae CLI')
-    expect(text).toContain('vitest run')
-    expect(parts.at(-1).finishReason).toBe('stop')
-  })
-
-  it('returns a bounded fallback summary after manifest inventory results instead of calling Trae again', async () => {
-    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
-    const model = new TraeLanguageModel('trae/coding', {
-allowCliFallback: true,
-cliPath: '/usr/bin/traecli',
-      enableToolCalling: true,
-      enforceTextOnly: true,
-      includeToolHistory: true,
-    })
-
-    const parts: any[] = []
-    for await (const part of (await model.doStream({
-      inputFormat: 'prompt',
-      mode: { type: 'regular' },
-      prompt: [
-        { role: 'user', content: [{ type: 'text', text: '帮我阅读当前文件夹下所有仓库的 package.json 与 README.md，给出3条建议' }] },
-        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'trae-router-manifest-inventory-0', toolName: 'bash', input: { command: 'inventory' } }] },
-        {
-          role: 'tool',
-          content: [{
-            type: 'tool-result',
-            toolCallId: 'trae-router-manifest-inventory-0',
-            toolName: 'bash',
-            output: { type: 'text', value: '### a/package.json\n{"name":"a","scripts":{"test":"vitest run"}}\n### a/README.md\n# A\n### b/package.json\n{"name":"b","scripts":{"build":"tsc"}}' },
-          }],
-        },
-      ],
-    } as any)).stream as any) parts.push(part)
-
-    expect(spawnMock).not.toHaveBeenCalled()
-    const text = parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')
-    expect(text).toContain('基于 OpenCode 工具读取结果')
-    expect(text).toContain('1.')
-    expect(text).toContain('2.')
-    expect(text).toContain('3.')
-    expect(text).toContain('a/package.json')
-    expect(parts.at(-1).finishReason).toBe('stop')
-  })
-
-  it('returns manifest file lists for direct package/readme listing requests', async () => {
-    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
-    const model = new TraeLanguageModel('fast', {
-allowCliFallback: true,
-cliPath: '/usr/bin/traecli',
-      includeToolHistory: true,
-    })
-
-    const parts: any[] = []
-    for await (const part of (await model.doStream({
-      inputFormat: 'prompt',
-      mode: { type: 'regular' },
-      prompt: [
-        { role: 'user', content: [{ type: 'text', text: '都有哪些package.json和readme' }] },
-        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'trae-router-manifest-inventory-0', toolName: 'bash', input: { command: 'inventory' } }] },
-        {
-          role: 'tool',
-          content: [{
-            type: 'tool-result',
-            toolCallId: 'trae-router-manifest-inventory-0',
-            toolName: 'bash',
-            output: { type: 'text', value: '### a/package.json\n{"name":"a"}\n### a/README.md\n# A\n### b/package.json\n{"name":"b"}' },
-          }],
-        },
-      ],
-    } as any)).stream as any) parts.push(part)
-
-    expect(spawnMock).not.toHaveBeenCalled()
-    const text = parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')
-    expect(text).toContain('package.json:')
-    expect(text).toContain('a/package.json')
-    expect(text).toContain('b/package.json')
-    expect(text).toContain('README.md:')
-    expect(text).toContain('a/README.md')
-    expect(text).not.toContain('工程化建议')
-    expect(text).not.toContain('1. 先统一')
-  })
-
-  it('does not truncate direct package/readme listing requests to summary limits', async () => {
-    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
-    const model = new TraeLanguageModel('fast', {
-allowCliFallback: true,
-cliPath: '/usr/bin/traecli',
-      includeToolHistory: true,
-    })
-    const inventory = Array.from({ length: 10 }, (_, index) => [
-      `### repo-${index}/package.json`,
-      `{"name":"repo-${index}"}`,
-      `### repo-${index}/README.md`,
-      `# Repo ${index}`,
-    ].join('\n')).join('\n')
-
-    const parts: any[] = []
-    for await (const part of (await model.doStream({
-      inputFormat: 'prompt',
-      mode: { type: 'regular' },
-      prompt: [
-        { role: 'user', content: [{ type: 'text', text: '都有哪些package.json和readme' }] },
-        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'trae-router-manifest-inventory-0', toolName: 'bash', input: { command: 'inventory' } }] },
-        {
-          role: 'tool',
-          content: [{
-            type: 'tool-result',
-            toolCallId: 'trae-router-manifest-inventory-0',
-            toolName: 'bash',
-            output: { type: 'text', value: inventory },
-          }],
-        },
-      ],
-    } as any)).stream as any) parts.push(part)
-
-    const text = parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')
-    expect(text).toContain('repo-0/package.json')
-    expect(text).toContain('repo-9/package.json')
-    expect(text).toContain('repo-0/README.md')
-    expect(text).toContain('repo-9/README.md')
+    expect(parts.filter((p) => p.type === 'error')).toHaveLength(1)
+    expect(parts.at(-1).finishReason).toBe('error')
   })
 
   it('routes manifest glob results to bounded read calls before asking Trae to summarize', async () => {

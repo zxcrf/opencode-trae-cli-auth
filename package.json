@@ -1,6 +1,6 @@
 {
   "name": "opencode-trae-cli-auth",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "opencode provider plugin that proxies models through the local Trae CLI",
   "type": "module",
   "main": "dist/index.js",
@@ -20,6 +20,7 @@
     "soak": "bun scripts/soak-run.mjs",
     "overnight": "node scripts/agentic-overnight.mjs",
     "smoke:tools": "bun scripts/smoke-tool-calls.mjs",
+    "smoke:opencode:rw": "bun scripts/smoke-opencode-read-write.mjs",
     "prepack": "bun run build",
     "prepublishOnly": "bun run test && bun run build",
     "test": "vitest run"

@@ -211,6 +211,20 @@ Strict mode (non-zero exit if no `tool-call` event):
 bun run smoke:tools -- --model trae/GLM-5.1 --strict
 ```
 
+OpenCode read/write tool smoke against the real provider path:
+
+```bash
+bun run smoke:opencode:rw -- --model trae/GLM-5.1
+```
+
+This creates an isolated temporary workspace and verifies real OpenCode `Bash`, `Read`, `Glob`, `Grep`, `Write`, and `Edit` execution through `opencode run --agent build --format json`.
+
+Include a heavier project-scaffolding case when you want to verify real coding setup behavior:
+
+```bash
+bun run smoke:opencode:rw -- --model trae/GLM-5.1 --includeScaffold
+```
+
 Overnight agentic run (prompt-file driven, no built-in demo prompts):
 
 ```bash

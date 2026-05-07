@@ -8,4 +8,8 @@ describe('package.json scripts', () => {
     expect(packageJson.scripts.prepack).not.toContain('npm run')
     expect(packageJson.scripts.prepublishOnly).not.toContain('npm run')
   })
+
+  it('exposes a real OpenCode read/write tool smoke entrypoint', () => {
+    expect(packageJson.scripts['smoke:opencode:rw']).toBe('bun scripts/smoke-opencode-read-write.mjs')
+  })
 })

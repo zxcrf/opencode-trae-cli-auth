@@ -23,7 +23,7 @@ const result = await runOnce({
 const durationMs = Date.now() - startedAt
 
 const events = parseJsonEvents(result.stdout)
-const toolCalls = events.filter((e) => e.type === 'tool-call')
+const toolCalls = events.filter((e) => e.type === 'tool-call' || e.type === 'tool_use')
 const finishEvents = events.filter((e) => e.type === 'finish')
 const hasToolCall = toolCalls.length > 0
 const finishReasons = finishEvents

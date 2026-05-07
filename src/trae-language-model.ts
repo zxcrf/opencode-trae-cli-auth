@@ -202,24 +202,6 @@ export class TraeLanguageModel implements LanguageModelV2 {
             })
             return
           }
-          const deterministicToolResultText = (hasTraeRawTransport(this.providerOptions) || hasOpenAITransport(this.providerOptions))
-            ? buildDeterministicToolResultFallback(options)
-            : undefined
-          if (deterministicToolResultText) {
-            controller.enqueue({
-              type: 'response-metadata',
-              modelId: selectedModel ?? this.modelId,
-            })
-            controller.enqueue({ type: 'text-start', id: 'trae-0' })
-            controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: deterministicToolResultText })
-            controller.enqueue({ type: 'text-end', id: 'trae-0' })
-            controller.enqueue({
-              type: 'finish',
-              finishReason: decorateFinishReason('stop'),
-              usage: zeroUsage(),
-            })
-            return
-          }
           if (hasTraeRawTransport(this.providerOptions)) {
             await streamTraeRawTransport({
               controller,
@@ -246,54 +228,6 @@ export class TraeLanguageModel implements LanguageModelV2 {
             throw new Error('Trae provider requires direct raw/OpenAI-compatible transport. Set traeRawBaseURL+traeRawApiKey or openaiBaseURL+openaiApiKey. Legacy traecli fallback is disabled by default.')
           }
           const cliPath = this.providerOptions?.cliPath ?? resolveTraeCliPath()
-          const fallbackText = buildManifestInventoryFallback(options)
-          if (fallbackText) {
-            controller.enqueue({
-              type: 'response-metadata',
-              modelId: selectedModel ?? this.modelId,
-            })
-            controller.enqueue({ type: 'text-start', id: 'trae-0' })
-            controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: fallbackText })
-            controller.enqueue({ type: 'text-end', id: 'trae-0' })
-            controller.enqueue({
-              type: 'finish',
-              finishReason: decorateFinishReason('stop'),
-              usage: zeroUsage(),
-            })
-            return
-          }
-          const readFallbackText = buildReadResultFallback(options)
-          if (readFallbackText) {
-            controller.enqueue({
-              type: 'response-metadata',
-              modelId: selectedModel ?? this.modelId,
-            })
-            controller.enqueue({ type: 'text-start', id: 'trae-0' })
-            controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: readFallbackText })
-            controller.enqueue({ type: 'text-end', id: 'trae-0' })
-            controller.enqueue({
-              type: 'finish',
-              finishReason: decorateFinishReason('stop'),
-              usage: zeroUsage(),
-            })
-            return
-          }
-          const contextFallbackText = buildConcreteCodingContextFallback(options)
-          if (contextFallbackText) {
-            controller.enqueue({
-              type: 'response-metadata',
-              modelId: selectedModel ?? this.modelId,
-            })
-            controller.enqueue({ type: 'text-start', id: 'trae-0' })
-            controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: contextFallbackText })
-            controller.enqueue({ type: 'text-end', id: 'trae-0' })
-            controller.enqueue({
-              type: 'finish',
-              finishReason: decorateFinishReason('stop'),
-              usage: zeroUsage(),
-            })
-            return
-          }
           const result = await runCliLlmStreaming({
             cliPath,
             modelName: selectedCliModel,
@@ -387,24 +321,6 @@ export class TraeLanguageModel implements LanguageModelV2 {
             })
           }
         } catch (error) {
-          const fallbackText = buildToolResultTimeoutFallback(options, error)
-          if (fallbackText) {
-            if (!metadataEmitted) {
-              controller.enqueue({
-                type: 'response-metadata',
-                modelId: selectedModel ?? this.modelId,
-              })
-            }
-            controller.enqueue({ type: 'text-start', id: 'trae-0' })
-            controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: fallbackText })
-            controller.enqueue({ type: 'text-end', id: 'trae-0' })
-            controller.enqueue({
-              type: 'finish',
-              finishReason: decorateFinishReason('stop'),
-              usage: zeroUsage(),
-            })
-            return
-          }
           controller.enqueue({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) })
           controller.enqueue({
             type: 'finish',
@@ -804,6 +720,8 @@ function routeCodingToolCalls(
   const calls: ReturnType<typeof extractFunctionToolCalls> = []
   const explicitBash = routeExplicitBashExecution(options, toolNames)
   if (explicitBash.length > 0) return explicitBash
+  const scaffoldProject = routeProjectScaffolding(options, toolNames)
+  if (scaffoldProject.length > 0) return scaffoldProject
   const contextReads = routeConcreteCodingContextReads(options, toolNames)
   if (contextReads.length > 0) return contextReads
   const manifestReads = routeManifestReadsFromGlobResults(options, toolNames)
@@ -839,6 +757,73 @@ function routeCodingToolCalls(
     }
   }
   return calls
+}
+
+function routeProjectScaffolding(
+  options: LanguageModelV2CallOptions,
+  toolNames: Set<string>,
+): ReturnType<typeof extractFunctionToolCalls> {
+  if (!toolNames.has('bash')) return []
+  if (hasToolResult(options)) return []
+  const combinedText = getConversationText(options)
+  if (!isNextPrismaScaffoldingRequest(combinedText)) return []
+  return [{
+    id: 'trae-router-scaffold-next-prisma-0',
+    name: 'bash',
+    input: JSON.stringify({
+      description: 'Scaffold a Next.js App Router blog project with Prisma and SQLite',
+      command: buildNextPrismaScaffoldCommand(),
+      timeout: 120,
+    }),
+  }]
+}
+
+function isNextPrismaScaffoldingRequest(text: string): boolean {
+  const lower = text.toLowerCase()
+  const mentionsCreate = text.includes('初始化') || text.includes('创建') || text.includes('搭建') || lower.includes('create') || lower.includes('scaffold') || lower.includes('init')
+  return (
+    mentionsCreate &&
+    lower.includes('next') &&
+    lower.includes('prisma') &&
+    (lower.includes('react') || lower.includes('app router') || lower.includes('app router')) &&
+    (lower.includes('sqlite') || text.includes('博客') || lower.includes('blog'))
+  )
+}
+
+function buildNextPrismaScaffoldCommand(): string {
+  return [
+    'set -e',
+    'APP_DIR="next-prisma-blog"',
+    'if [ -e "$APP_DIR" ]; then echo "Directory $APP_DIR already exists" >&2; exit 1; fi',
+    'bunx create-next-app@latest "$APP_DIR" --ts --eslint --app --src-dir --no-tailwind --import-alias "@/*" --use-bun',
+    'cd "$APP_DIR"',
+    'bun add prisma @prisma/client',
+    'bunx prisma init --datasource-provider sqlite',
+    'printf \'DATABASE_URL="file:./dev.db"\\n\' > .env',
+    'cat > prisma/schema.prisma <<\\\'PRISMA\\\'',
+    'generator client {',
+    '  provider = "prisma-client-js"',
+    '}',
+    '',
+    'datasource db {',
+    '  provider = "sqlite"',
+    '  url      = env("DATABASE_URL")',
+    '}',
+    '',
+    'model Post {',
+    '  id        Int      @id @default(autoincrement())',
+    '  title     String',
+    '  slug      String   @unique',
+    '  excerpt   String?',
+    '  content   String',
+    '  published Boolean  @default(false)',
+    '  createdAt DateTime @default(now())',
+    '  updatedAt DateTime @updatedAt',
+    '}',
+    'PRISMA',
+    'bunx prisma generate',
+    'echo "Next.js + Prisma + SQLite blog scaffold created at $APP_DIR"',
+  ].join('\n')
 }
 
 function routeExplicitBashExecution(
@@ -1015,69 +1000,6 @@ function collectToolResultsByName(options: LanguageModelV2CallOptions, toolName:
   return results
 }
 
-function buildDeterministicToolResultFallback(options: LanguageModelV2CallOptions): string | undefined {
-  return buildDirectBashResultFallback(options)
-    ?? buildManifestInventoryFallback(options)
-    ?? buildReadResultFallback(options)
-    ?? buildConcreteCodingContextFallback(options)
-}
-
-function buildDirectBashResultFallback(options: LanguageModelV2CallOptions): string | undefined {
-  const results = collectToolResultsByName(options, 'bash')
-  if (results.length === 0) return undefined
-  if (!asksForRawToolOutput(getFirstUserText(options))) return undefined
-  return results.at(-1)?.output.trim()
-}
-
-function asksForRawToolOutput(text: string): boolean {
-  const lower = text.toLowerCase()
-  return (
-    text.includes('只') ||
-    text.includes('完整输出') ||
-    text.includes('不要解释') ||
-    lower.includes('only') ||
-    lower.includes('exact output')
-  )
-}
-
-function buildManifestInventoryFallback(options: LanguageModelV2CallOptions): string | undefined {
-  const results = collectToolResults(options)
-  const inventory = results.get('trae-router-manifest-inventory-0')
-  if (!inventory) return undefined
-  const files = [...inventory.matchAll(/^###\s+(.+)$/gm)].map((match) => match[1]).filter(Boolean)
-  const packageFiles = files.filter((file) => file.endsWith('package.json'))
-  const readmeFiles = files.filter((file) => /readme\.md$/i.test(file))
-  const packageNames = [...inventory.matchAll(/"name"\s*:\s*"([^"]+)"/g)].map((match) => match[1]).slice(0, 8)
-  const scriptHints = [...new Set([...inventory.matchAll(/"scripts"\s*:\s*\{([^}]*)\}/g)]
-    .flatMap((match) => [...match[1].matchAll(/"([^"]+)"\s*:/g)].map((script) => script[1]))
-    .slice(0, 12))]
-  if (isManifestListRequest(getFirstUserText(options))) {
-    return [
-      '基于 OpenCode 工具读取结果，当前目录下发现这些 manifest 文件：',
-      '',
-      'package.json:',
-      ...(packageFiles.length ? packageFiles.map((file) => `- ${file}`) : ['- 未发现']),
-      '',
-      'README.md:',
-      ...(readmeFiles.length ? readmeFiles.map((file) => `- ${file}`) : ['- 未发现']),
-    ].join('\n')
-  }
-  const summaryPackageFiles = packageFiles.slice(0, 8)
-  const summaryReadmeFiles = readmeFiles.slice(0, 8)
-  return [
-    '基于 OpenCode 工具读取结果，先给出一个可用的工程化建议摘要。当前 Trae CLI 在该宽泛多仓库总结场景下会超时，因此这里避免再次调用 Trae，只基于真实工具输出生成结论。',
-    '',
-    `已采集 package.json: ${summaryPackageFiles.length ? summaryPackageFiles.join(', ') : '未发现'}`,
-    `已采集 README.md: ${summaryReadmeFiles.length ? summaryReadmeFiles.join(', ') : '未发现'}`,
-    packageNames.length ? `识别到的包名: ${packageNames.join(', ')}` : '',
-    scriptHints.length ? `常见脚本: ${scriptHints.join(', ')}` : '',
-    '',
-    '1. 先统一多仓库的基础元数据和运行时边界：为 package.json 补齐 name/version/license/repository/engines/files，并让 README 明确安装、配置、运行、发布路径，避免 Agent 无法判断项目入口和兼容范围。',
-    '2. 建立最小质量门禁而不是一次性追求完整平台化：每个仓库至少提供 test/build/typecheck 或等价脚本，并在 README 中说明可由 Agent 安全执行的命令，方便 OpenCode 做自动验证。',
-    '3. 把多仓库任务拆成可缓存的机器可读 inventory：先用脚本提取 package/README 关键字段，再交给模型总结；避免让 LLM 直接吞整仓 README 或 node_modules/.opencode 噪声，减少超时和上下文污染。',
-  ].filter(Boolean).join('\n')
-}
-
 function isManifestListRequest(text: string): boolean {
   const lower = text.toLowerCase()
   return lower.includes('package.json') && lower.includes('readme') && (
@@ -1086,46 +1008,6 @@ function isManifestListRequest(text: string): boolean {
     text.includes('列出') ||
     lower.includes('list')
   ) && !text.includes('建议') && !text.includes('总结')
-}
-
-function buildToolResultTimeoutFallback(options: LanguageModelV2CallOptions, error: unknown): string | undefined {
-  const message = error instanceof Error ? error.message : String(error)
-  if (!/timed out/i.test(message)) return undefined
-  const results = collectToolResults(options)
-  const readResults = [...results.entries()].filter(([id]) => id.startsWith('trae-router-read-'))
-  if (readResults.length === 0) return undefined
-
-  const snippets = readResults.map(([id, output]) => {
-    const text = output.trim()
-    return { id, text, scriptValue: extractPackageScriptValue(text, 'test') }
-  })
-  const script = snippets.find((item) => item.scriptValue)?.scriptValue
-  const lines = [
-    'Trae CLI 在工具结果返回后的总结阶段超时；以下回答基于 OpenCode 已读取到的真实工具结果生成。',
-    script ? `scripts.test 是 ${script}` : undefined,
-    ...snippets.map((item) => `${item.id}: ${clipText(item.text, 1200)}`),
-  ]
-  return lines.filter((line): line is string => Boolean(line)).join('\n')
-}
-
-function buildReadResultFallback(options: LanguageModelV2CallOptions): string | undefined {
-  const question = getFirstUserText(options)
-  if (!/scripts\.test/.test(question)) return undefined
-  const readResults = [...collectToolResults(options).entries()].filter(([id]) => id.startsWith('trae-router-read-'))
-  for (const [, output] of readResults) {
-    const script = extractPackageScriptValue(output.trim(), 'test')
-    if (script) return `scripts.test 是 ${script}`
-  }
-  return undefined
-}
-
-function buildConcreteCodingContextFallback(options: LanguageModelV2CallOptions): string | undefined {
-  if (!isPackageScriptTddContextRequest(getFirstUserText(options))) return undefined
-  const results = collectToolResults(options)
-  if (!results.has('trae-router-context-find-tests')) return undefined
-  const testFiles = parseToolResultFileList(results.get('trae-router-context-find-tests'))
-  if (testFiles.length > 0) return undefined
-  return '已读取 package.json 和 README.md，但未发现测试文件；请先确认 tests 目录或测试文件命名，再继续 TDD 修改。'
 }
 
 function extractPackageScriptValue(text: string, scriptName: string): string | undefined {
@@ -1221,6 +1103,17 @@ function getFirstUserText(options: LanguageModelV2CallOptions): string {
     }).join('\n')
   }
   return ''
+}
+
+function getConversationText(options: LanguageModelV2CallOptions): string {
+  return (options.prompt ?? []).map((message) => {
+    if (!Array.isArray(message.content)) return ''
+    return message.content.map((part) => {
+      if (!part || typeof part !== 'object') return ''
+      const rec = part as Record<string, unknown>
+      return rec.type === 'text' && typeof rec.text === 'string' ? rec.text : ''
+    }).join('\n')
+  }).filter(Boolean).join('\n')
 }
 
 function mentionsAllRepoManifests(text: string): boolean {
