@@ -83,6 +83,7 @@ const KIMI_INVOKE_PARAMETER_RE = /(?:<invoke>\s*)?([A-Za-z_][A-Za-z0-9_-]*)\s*<p
 const TRAE_COMPACT_TOOL_CALL_RE = /<tool_call>\s*([^\s<]+)\s*<\/arg_key>\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*([\s\S]*?)(?=\n---|\n<tool_call>|$)/gi
 const TRAE_JSON_CLOSE_TOOL_CALL_RE = /(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})\s*<\/tool_call>/gi
 const TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE = /(?<!["A-Za-z0-9_])"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}\s*<\/tool_call>/gi
+const EMPTY_NATIVE_TOOL_CALLS_RE = /<tool_calls>\s*<\/tool_calls>/gi
 
 export function extractFunctionToolCalls(result: TraeCliResult): TraeFunctionToolCall[] {
   if (hasFinalTopLevelText(result)) return []
@@ -176,6 +177,7 @@ export function stripTextToolCallBlocks(content: unknown): string {
     .replace(TRAE_COMPACT_TOOL_CALL_RE, '')
     .replace(TRAE_JSON_CLOSE_TOOL_CALL_RE, '')
     .replace(TRAE_JSON_ARGS_CLOSE_TOOL_CALL_RE, '')
+    .replace(EMPTY_NATIVE_TOOL_CALLS_RE, '')
     .replace(/^\s*---\s*$/gm, '')
     .trim()
 }

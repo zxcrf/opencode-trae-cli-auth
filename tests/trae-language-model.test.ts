@@ -539,6 +539,36 @@ cliPath: '/usr/bin/traecli',
     expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
   })
 
+  it('does not leak empty native-looking tool_calls containers as assistant text', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      'event: output\ndata: {"response":"<tool_calls>\\n</tool_calls>","tool_calls":null}\n\n',
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('DeepSeek-V4-Pro', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' } } } }],
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'list tmp' }] }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(parts.some((p) => p.type === 'tool-call')).toBe(false)
+    expect(parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')).toBe('')
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'stop' })
+  })
+
   it('stops the raw stream turn after a text tool_use so OpenCode executes the tool', async () => {
     const fetchMock = vi.fn(async () => new Response(
       [
@@ -1254,8 +1284,8 @@ cliPath: '/usr/bin/traecli',
     for await (const _ of (await streamPromise).stream as any) {}
 
     const [, args] = spawnMock.mock.calls[0]
-    expect(args[0]).not.toContain('<tool_call')
-    expect(args[0]).not.toContain('<tool_result')
+    expect(args[0]).not.toContain('<tool_call>')
+    expect(args[0]).not.toContain('<tool_result>')
   })
 
   it('injects coding system preamble when tool calling is enabled', async () => {

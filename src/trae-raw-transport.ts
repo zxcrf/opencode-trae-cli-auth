@@ -37,6 +37,7 @@ export type TraeRawStreamFinish = {
   type: 'finish'
   finishReason: 'stop' | 'tool-calls' | 'error'
   usage?: LanguageModelV2Usage
+  hadOutput?: boolean
 }
 
 export type TraeRawStreamEvent = TraeRawStreamTextDelta | TraeRawStreamToolDelta | TraeRawStreamFinish
@@ -102,6 +103,7 @@ export async function* streamTraeRawChat(
   let finishReason: TraeRawStreamFinish['finishReason'] = 'stop'
   let pendingToolText = ''
   let emittedExternalToolCall = false
+  let sawOutputFrame = false
   const mapTextToolCall = (toolCall: { id: string; name: string; input: string }): TraeRawStreamToolDelta => {
     finishReason = 'tool-calls'
     return {
@@ -122,6 +124,7 @@ export async function* streamTraeRawChat(
       continue
     }
     if (frame.event !== 'output' || !frame.data) continue
+    sawOutputFrame = true
     if (emittedExternalToolCall) continue
 
     const responseText = typeof frame.data.response === 'string' ? frame.data.response : ''
@@ -131,7 +134,8 @@ export async function* streamTraeRawChat(
       pendingToolText = textDelta.pendingToolText
       for (const toolDelta of textDelta.toolDeltas) yield toolDelta
       if (textDelta.toolDeltas.length > 0) emittedExternalToolCall = true
-      if (textDelta.text) yield { type: 'text-delta', delta: textDelta.text }
+      const visibleText = stripTextToolCallBlocks(textDelta.text)
+      if (visibleText) yield { type: 'text-delta', delta: visibleText }
       emittedText = responseText
     }
 
@@ -152,10 +156,11 @@ export async function* streamTraeRawChat(
     pendingToolText = textDelta.pendingToolText
     for (const toolDelta of textDelta.toolDeltas) yield toolDelta
     if (textDelta.toolDeltas.length > 0) emittedExternalToolCall = true
-    if (textDelta.text) yield { type: 'text-delta', delta: textDelta.text }
+    const visibleText = stripTextToolCallBlocks(textDelta.text)
+    if (visibleText) yield { type: 'text-delta', delta: visibleText }
   }
 
-  yield { type: 'finish', finishReason, usage: finalUsage }
+  yield { type: 'finish', finishReason, usage: finalUsage, hadOutput: sawOutputFrame }
 
   function consumeTextDeltaForToolCalls(
     delta: string,

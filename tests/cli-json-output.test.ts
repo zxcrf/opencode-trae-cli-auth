@@ -323,4 +323,9 @@ describe('text tool-call protocol', () => {
 
     expect(stripTextToolCallBlocks(content)).toBe('I need to inspect files.')
   })
+
+  it('strips empty native-looking tool_calls containers before emitting assistant text', () => {
+    expect(extractTextToolCalls('<tool_calls>\n</tool_calls>')).toEqual([])
+    expect(stripTextToolCallBlocks('<tool_calls>\n</tool_calls>')).toBe('')
+  })
 })

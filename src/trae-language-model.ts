@@ -435,6 +435,7 @@ async function streamTraeRawTransport(args: {
   })
   let textStarted = false
   let sawOutput = false
+  let sawRawOutput = false
   const toolCalls = new Map<number, { id: string; name: string; input: string }>()
   const transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
   for await (const event of streamTraeRawChat({
@@ -449,6 +450,7 @@ async function streamTraeRawTransport(args: {
     abortSignal: args.options.abortSignal,
   }, transportOptions)) {
     if (event.type === 'text-delta') {
+      sawRawOutput = true
       sawOutput = true
       if (!textStarted) {
         args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
@@ -458,12 +460,13 @@ async function streamTraeRawTransport(args: {
       continue
     }
     if (event.type === 'tool-call-delta') {
+      sawRawOutput = true
       sawOutput = true
       applyTraeRawToolDelta(toolCalls, event)
       continue
     }
     if (event.type === 'finish') {
-      if (!sawOutput) {
+      if (!sawOutput && !sawRawOutput && event.hadOutput !== true) {
         throw new Error('Trae raw chat stream ended without text or tool calls')
       }
       if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
@@ -712,6 +715,7 @@ function resolveSystemPreamble(options?: TraeProviderOptions, tools?: LanguageMo
     'If repository or filesystem facts are needed, request an OpenCode tool before answering.',
     'When a tool is needed, output exactly one <opencode_tool_call> block and no other text.',
     'The block content must be JSON: {"id":"optional-stable-id","name":"tool_name","input":{...}}.',
+    'Never output empty tool containers such as <tool_calls></tool_calls>; if you need a tool, include a concrete tool name and input.',
     'After OpenCode returns the tool result, continue from the result instead of fabricating command output.',
     'For direct final answers, do not output a tool block.',
     'Inspect files before edits, keep edits minimal, then request verification commands when needed.',
