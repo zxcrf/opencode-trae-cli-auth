@@ -15,7 +15,7 @@ import { extractFunctionToolCalls, extractTextToolCalls, stripTextToolCallBlocks
 import { contentToText } from './cli/text-content.js'
 import { mapUsage } from './cli/usage.js'
 import { runCliLlmStreaming } from './cli/cli-runner.js'
-import { TRAE_MODEL_PROFILES } from './models.js'
+import { TRAE_CLOUD_MODEL_IDS } from './models.js'
 import { streamOpenAIChatCompletions, type OpenAIStreamToolDelta } from './openai-transport.js'
 import { streamTraeRawChat, type TraeRawStreamToolDelta } from './trae-raw-transport.js'
 
@@ -46,6 +46,14 @@ export type TraeProviderOptions = {
   maxRetries?: number
   retryDelayMs?: number
   sessionId?: string
+}
+
+const LEGACY_MODEL_ALIASES: Record<string, string> = {
+  default: 'GLM-5.1',
+  fast: 'MiniMax-M2.7',
+  balanced: 'GLM-5.1',
+  strong: 'Kimi-K2.6',
+  coding: 'GLM-5.1',
 }
 
 function decorateFinishReason(reason: LanguageModelV2FinishReason): LanguageModelV2FinishReason {
@@ -102,7 +110,7 @@ function applyRuntimeModelDefaults(modelId: string, options?: TraeProviderOption
 }
 
 function isAgenticTraeModel(modelId: string): boolean {
-  return modelId === 'default' || modelId in TRAE_MODEL_PROFILES || Object.values(TRAE_MODEL_PROFILES).includes(modelId as typeof TRAE_MODEL_PROFILES[keyof typeof TRAE_MODEL_PROFILES])
+  return modelId in LEGACY_MODEL_ALIASES || (TRAE_CLOUD_MODEL_IDS as readonly string[]).includes(modelId)
 }
 
 export function createTraeProvider(options?: TraeProviderOptions): ProviderV2 {
@@ -178,6 +186,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
         let metadataEmitted = false
         let lastUsage: LanguageModelV2Usage | undefined
         const selectedModel = resolveTraeModelName(this.modelId, this.providerOptions)
+        const selectedCliModel = resolveTraeCliModelName(this.modelId, this.providerOptions)
         try {
           const routedToolCalls = routeCodingToolCalls(options, this.providerOptions)
           if (routedToolCalls.length > 0) {
@@ -287,7 +296,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
           }
           const result = await runCliLlmStreaming({
             cliPath,
-            modelName: selectedModel,
+            modelName: selectedCliModel,
             prompt: buildPromptFromOptions(options, {
               includeToolHistory: this.providerOptions?.includeToolHistory ?? this.providerOptions?.enableToolCalling === true,
               maxMessages: this.providerOptions?.maxPromptMessages ?? 40,
@@ -598,10 +607,22 @@ function applyOpenAIToolDelta(
 function resolveTraeModelName(modelId: string, options?: TraeProviderOptions): string | undefined {
   const normalizedModelId = stripProviderPrefix(modelId)
   if (options?.modelName) return options.modelName
+  const aliases = {
+    ...LEGACY_MODEL_ALIASES,
+    ...(options?.modelAliases ?? {}),
+  }
+  return aliases[normalizedModelId] ?? normalizedModelId
+}
+
+function resolveTraeCliModelName(modelId: string, options?: TraeProviderOptions): string | undefined {
+  const normalizedModelId = stripProviderPrefix(modelId)
+  if (options?.modelName) return options.modelName
   if (normalizedModelId === 'coding' && !options?.modelAliases?.coding) return undefined
   if (normalizedModelId === 'default') return undefined
   const aliases = {
-    ...TRAE_MODEL_PROFILES,
+    fast: LEGACY_MODEL_ALIASES.fast,
+    balanced: LEGACY_MODEL_ALIASES.balanced,
+    strong: LEGACY_MODEL_ALIASES.strong,
     ...(options?.modelAliases ?? {}),
   }
   return aliases[normalizedModelId] ?? normalizedModelId

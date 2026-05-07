@@ -1,6 +1,6 @@
 import type { Hooks, Plugin } from '@opencode-ai/plugin'
 import { existsSync } from 'node:fs'
-import { TRAE_MODELS, TRAE_MODEL_PROFILES, type TraeModelDefinition } from './src/models.js'
+import { TRAE_MODELS, type TraeModelDefinition } from './src/models.js'
 import { discoverTraeModels } from './src/trae-config-models.js'
 import { resolveTraeCliPath } from './src/trae-language-model.js'
 

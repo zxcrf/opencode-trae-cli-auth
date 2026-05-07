@@ -69,26 +69,11 @@ opencode models trae
 
 Built-in model ids currently include:
 
-- `trae/default`
-- `trae/Doubao-Seed-2.0-Code`
 - `trae/Doubao-Seed-Code`
 - `trae/GLM-5.1`
-- `trae/GLM-5`
-- `trae/GLM-4.7`
 - `trae/MiniMax-M2.7`
-- `trae/fast` (alias to `MiniMax-M2.7`)
-- `trae/balanced` (alias to `GLM-5.1`)
-- `trae/strong` (alias to `Kimi-K2.6`)
-- `trae/coding` (alias to `GLM-5.1`)
-- `trae/MiniMax-M2.5`
-- `trae/Qwen3-Coder-Next`
 - `trae/Kimi-K2.6`
-- `trae/Kimi-K2.5`
 - `trae/DeepSeek-V4-Pro`
-- `trae/DeepSeek-V3.2`
-- `trae/DeepSeek-V3.1-Terminus`
-
-Aliases such as `trae/fast`, `trae/balanced`, `trae/strong`, and `trae/coding` are mapped by the provider before calling direct HTTP transports.
 
 ## Usage
 
@@ -153,7 +138,7 @@ Smoke check a local Trae CLI and OpenCode install:
 
 ```bash
 traecli "reply with ok" -p --json
-opencode run --agent build --model trae/default "reply with ok"
+opencode run --agent build --model trae/GLM-5.1 "reply with ok"
 ```
 
 Recommended local config examples:
@@ -211,26 +196,26 @@ Legacy CLI debug example:
 Optional soak test (success rate + latency summary):
 
 ```bash
-bun run soak -- --model trae/default --runs 12 --concurrency 3
+bun run soak -- --model trae/GLM-5.1 --runs 12 --concurrency 3
 ```
 
 Tool-calling smoke (reports whether `tool-call` events are observed):
 
 ```bash
-bun run smoke:tools -- --model trae/coding
+bun run smoke:tools -- --model trae/GLM-5.1
 ```
 
 Strict mode (non-zero exit if no `tool-call` event):
 
 ```bash
-bun run smoke:tools -- --model trae/coding --strict
+bun run smoke:tools -- --model trae/GLM-5.1 --strict
 ```
 
 Overnight agentic run (prompt-file driven, no built-in demo prompts):
 
 ```bash
 bun run overnight -- \
-  --model trae/coding \
+  --model trae/GLM-5.1 \
   --hours 8 \
   --concurrency 2 \
   --timeoutMs 180000 \
