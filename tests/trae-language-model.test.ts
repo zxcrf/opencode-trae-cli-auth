@@ -2284,7 +2284,68 @@ cliPath: '/usr/bin/traecli',
     expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'stop' })
   })
 
-  it('routes current directory inspection to bash instead of model-invented reference reads', async () => {
+  it('drops injected agent instruction file reads', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('coding', {
+      allowCliFallback: true,
+      cliPath: '/usr/bin/traecli',
+      enableToolCalling: true,
+    })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: '当前目录下都有什么，请你评估一下适合做什么' }] }],
+      tools: [{
+        type: 'function',
+        name: 'read',
+        inputSchema: { type: 'object', properties: { filePath: { type: 'string' } } },
+      }],
+    } as any)
+
+    setImmediate(() => {
+      stdout.write(JSON.stringify({
+        agent_states: [
+          {
+            messages: [
+              {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    id: 'call-agents-md',
+                    type: 'function',
+                    function: {
+                      name: 'read',
+                      arguments: '{"filePath":"AGENTS.md"}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        message: { content: '' },
+      }))
+      stderr.end()
+      stdout.end()
+      closeChild(child)
+    })
+
+    const parts: any[] = []
+    for await (const part of (await streamPromise).stream as any) parts.push(part)
+
+    expect(parts.find((p) => p.type === 'tool-call')).toBeUndefined()
+    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'stop' })
+  })
+
+  it('does not deterministic-route broad current directory questions', async () => {
     const { TraeLanguageModel } = await import('../src/trae-language-model.js')
     const model = new TraeLanguageModel('Kimi-K2.6', {
       traeRawBaseURL: 'https://api.enterprise.trae.cn',
@@ -2312,47 +2373,7 @@ cliPath: '/usr/bin/traecli',
     } as any)).stream as any) parts.push(part)
 
     expect(spawnMock).not.toHaveBeenCalled()
-    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
-      toolCallId: 'trae-router-directory-inspection-0',
-      toolName: 'bash',
-      input: '{"command":"rtk ls -la .","description":"List current directory contents"}',
-    })
-    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'tool-calls' })
-  })
-
-  it('summarizes current directory inspection results without asking the model again', async () => {
-    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
-    const model = new TraeLanguageModel('Kimi-K2.6', {
-      traeRawBaseURL: 'https://api.enterprise.trae.cn',
-      traeRawApiKey: 'test-key',
-      enableToolCalling: true,
-    } as any)
-
-    const parts: any[] = []
-    for await (const part of (await model.doStream({
-      inputFormat: 'prompt',
-      mode: { type: 'regular' },
-      prompt: [
-        { role: 'user', content: [{ type: 'text', text: '当前目录下都有什么，请你评估一下适合做什么' }] },
-        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'trae-router-directory-inspection-0', toolName: 'bash', input: { command: 'rtk ls -la .' } }] },
-        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'trae-router-directory-inspection-0', toolName: 'bash', output: { type: 'text', value: 'package.json  1K\nREADME.md  2K\nsrc/\ntests/\ntrae-mitm/\n' } }] },
-      ],
-      tools: {
-        bash: {
-          type: 'function',
-          description: 'Run shell command',
-          inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } },
-        },
-      },
-    } as any)).stream as any) parts.push(part)
-
-    expect(spawnMock).not.toHaveBeenCalled()
-    const text = parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')
-    expect(text).toContain('基于 OpenCode 工具读取结果')
-    expect(text).toContain('package.json')
-    expect(text).toContain('AI coding/provider 调试')
     expect(parts.find((p) => p.type === 'tool-call')).toBeUndefined()
-    expect(parts.at(-1)).toMatchObject({ type: 'finish', finishReason: 'stop' })
   })
 
   it('maps ls tool calls to glob with a safe pattern', async () => {

@@ -717,8 +717,6 @@ function routeCodingToolCalls(
   const manifestReads = routeManifestReadsFromGlobResults(options, toolNames)
   if (manifestReads.length > 0) return manifestReads
   if (hasToolResult(options)) return []
-  const directoryInspection = routeCurrentDirectoryInspection(userText, toolNames)
-  if (directoryInspection.length > 0) return directoryInspection
   if (toolNames.has('bash') && mentionsAllRepoManifests(userText)) {
     calls.push({
       id: 'trae-router-manifest-inventory-0',
@@ -749,41 +747,6 @@ function routeCodingToolCalls(
     }
   }
   return calls
-}
-
-function routeCurrentDirectoryInspection(
-  userText: string,
-  toolNames: Set<string>,
-): ReturnType<typeof extractFunctionToolCalls> {
-  if (!toolNames.has('bash')) return []
-  if (!mentionsCurrentDirectoryInspection(userText)) return []
-  return [{
-    id: 'trae-router-directory-inspection-0',
-    name: 'bash',
-    input: JSON.stringify({
-      command: 'rtk ls -la .',
-      description: 'List current directory contents',
-    }),
-  }]
-}
-
-function mentionsCurrentDirectoryInspection(text: string): boolean {
-  const lower = text.toLowerCase()
-  const mentionsCurrentDirectory = (
-    text.includes('当前目录') ||
-    text.includes('当前文件夹') ||
-    lower.includes('current directory') ||
-    lower.includes('current folder')
-  )
-  if (!mentionsCurrentDirectory) return false
-  return (
-    text.includes('有什么') ||
-    text.includes('有哪些') ||
-    text.includes('评估') ||
-    text.includes('适合做什么') ||
-    lower.includes('what is here') ||
-    lower.includes('list')
-  )
 }
 
 function routeExplicitBashExecution(
@@ -962,7 +925,6 @@ function collectToolResultsByName(options: LanguageModelV2CallOptions, toolName:
 
 function buildDeterministicToolResultFallback(options: LanguageModelV2CallOptions): string | undefined {
   return buildDirectBashResultFallback(options)
-    ?? buildDirectoryInspectionFallback(options)
     ?? buildManifestInventoryFallback(options)
     ?? buildReadResultFallback(options)
     ?? buildConcreteCodingContextFallback(options)
@@ -984,52 +946,6 @@ function asksForRawToolOutput(text: string): boolean {
     lower.includes('only') ||
     lower.includes('exact output')
   )
-}
-
-function buildDirectoryInspectionFallback(options: LanguageModelV2CallOptions): string | undefined {
-  const results = collectToolResults(options)
-  const output = results.get('trae-router-directory-inspection-0')?.trim()
-  if (!output) return undefined
-  const entries = output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !line.startsWith('total '))
-  const directories = entries.filter((line) => line.endsWith('/')).slice(0, 12)
-  const files = entries.filter((line) => !line.endsWith('/')).slice(0, 12)
-  const traits = inferDirectoryTraits(entries)
-  return [
-    '基于 OpenCode 工具读取结果，当前目录主要包含：',
-    directories.length ? `目录：${directories.join(', ')}` : '',
-    files.length ? `文件：${files.join(', ')}` : '',
-    '',
-    traits.length ? '适合做的事情：' : '适合做的事情：先补充 README/package.json 等项目入口文件，再做进一步工程化评估。',
-    ...traits.map((trait, index) => `${index + 1}. ${trait}`),
-  ].filter(Boolean).join('\n')
-}
-
-function inferDirectoryTraits(entries: string[]): string[] {
-  const joined = entries.join('\n').toLowerCase()
-  const traits: string[] = []
-  if (/package\.json|bun\.lock|pnpm-lock|npm-/.test(joined)) {
-    traits.push('前端或 Node/Bun 工程整理：检查 package.json、测试脚本、构建脚本和依赖管理。')
-  }
-  if (/\.go$|go\.mod/.test(joined)) {
-    traits.push('Go 服务工程整理：检查模块边界、测试覆盖、构建和发布流程。')
-  }
-  if (/pyproject\.toml|requirements\.txt|\.py$/.test(joined)) {
-    traits.push('Python 工程整理：检查依赖、入口脚本、测试和环境隔离。')
-  }
-  if (/readme\.md|license|changelog/.test(joined)) {
-    traits.push('文档和交付物梳理：整理 README、使用说明、变更记录和许可证信息。')
-  }
-  if (/opencode|trae|mitm|proxy/.test(joined)) {
-    traits.push('AI coding/provider 调试：适合继续验证 OpenCode 工具调用、模型路由和代理抓包结果。')
-  }
-  if (traits.length === 0) {
-    traits.push('目录盘点和清理：先区分源码、临时文件、日志和构建产物，再决定是否拆分成项目仓库。')
-  }
-  return traits.slice(0, 4)
 }
 
 function buildManifestInventoryFallback(options: LanguageModelV2CallOptions): string | undefined {
@@ -1167,7 +1083,10 @@ function isWorkspaceFileCandidate(filePath: string): boolean {
 
 function isInternalReferencePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '')
-  return /^references\/[a-z0-9._-]*tools\.md$/i.test(normalized)
+  return (
+    /^references\/[a-z0-9._-]*tools\.md$/i.test(normalized) ||
+    /(^|\/)(AGENTS|RTK|CLAUDE)\.md$/i.test(normalized)
+  )
 }
 
 function hasAnyToolCall(options: LanguageModelV2CallOptions, idPrefix: string): boolean {
