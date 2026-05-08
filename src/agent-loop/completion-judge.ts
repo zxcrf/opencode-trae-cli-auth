@@ -1,5 +1,5 @@
 import type { LanguageModelV2CallOptions } from '@ai-sdk/provider'
-import { clipText, collectRecentToolResults, getFirstUserText, listToolNames, parseJsonObjectLenient } from './prompt-utils.js'
+import { clipText, collectRecentToolResults, getLatestUserText, listToolNames, parseJsonObjectLenient } from './prompt-utils.js'
 
 export type CompletionJudgeDecision = {
   status: 'complete' | 'incomplete' | 'needs_user'
@@ -18,7 +18,7 @@ export function buildCompletionJudgePrompt(args: {
 }): LanguageModelV2CallOptions {
   const toolNames = listToolNames(args.options.tools)
   const toolResultSummary = collectRecentToolResults(args.options).slice(-3).map((entry) => `${entry.toolName}[${entry.id}]: ${clipText(entry.output, 400)}`).join('\n')
-  const userGoal = getFirstUserText(args.options)
+  const userGoal = getLatestUserText(args.options)
   return {
     ...args.options,
     tools: undefined,

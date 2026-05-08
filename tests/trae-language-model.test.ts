@@ -2472,6 +2472,46 @@ cliPath: '/usr/bin/traecli',
     expect(args[0]).toContain('给出3条建议')
   })
 
+  it('uses the latest user message for the current task reminder in multi-turn sessions', async () => {
+    const stdout = new PassThrough()
+    const stderr = new PassThrough()
+    const child = new EventEmitter() as ChildProcessWithoutNullStreams
+    child.stdout = stdout as any
+    child.stderr = stderr as any
+    child.kill = vi.fn() as any
+    spawnMock.mockReturnValue(child)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('default', {
+      allowCliFallback: true,
+      cliPath: '/usr/bin/traecli',
+      enableToolCalling: true,
+      enforceTextOnly: true,
+      includeToolHistory: true,
+    })
+    const streamPromise = model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [
+        { role: 'user', content: [{ type: 'text', text: '当前目录下都有哪些工程，适合做什么' }] },
+        { role: 'assistant', content: [{ type: 'text', text: '当前目录下有多个工程，适合做插件开发。' }] },
+        { role: 'user', content: [{ type: 'text', text: '升级本机opencode的 oh-my-opencode-slim 插件' }] },
+      ],
+    } as any)
+
+    setImmediate(() => {
+      stdout.end('{"message":{"content":"ok"}}')
+      stderr.end('')
+      closeChild(child)
+    })
+    for await (const _ of (await streamPromise).stream as any) {}
+
+    const [, args] = spawnMock.mock.calls[0]
+    expect(args[0]).toContain('Current task reminder:')
+    expect(args[0]).toContain('升级本机opencode的 oh-my-opencode-slim 插件')
+    expect(args[0]).not.toContain('Current task reminder:\\n当前目录下都有哪些工程')
+  })
+
   it('emits tool-call finish before the Trae process closes', async () => {
     const stdout = new PassThrough()
     const stderr = new PassThrough()

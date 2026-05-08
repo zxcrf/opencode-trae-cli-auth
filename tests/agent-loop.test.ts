@@ -32,6 +32,33 @@ describe('agent loop primitives', () => {
     expect(JSON.stringify(judgeInput)).toContain('先确认当前版本')
   })
 
+  it('uses the latest user turn as the active completion goal', () => {
+    const prompt = buildCompletionJudgePrompt({
+      options: {
+        tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object' } }],
+        prompt: [
+          { role: 'user', content: [{ type: 'text', text: '当前目录下都有哪些工程，适合做什么' }] },
+          { role: 'assistant', content: [{ type: 'text', text: '当前目录有若干工程。' }] },
+          { role: 'user', content: [{ type: 'text', text: '升级本机opencode的 oh-my-opencode-slim 插件' }] },
+          {
+            role: 'tool',
+            content: [{
+              type: 'tool-result',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              output: 'oh-my-opencode-slim@0.9.12',
+            }],
+          },
+        ],
+      } as LanguageModelV2CallOptions,
+      assistantText: '先确认安装方式。',
+    })
+
+    const judgeInput = JSON.stringify(prompt.prompt?.at(1))
+    expect(judgeInput).toContain('升级本机opencode的 oh-my-opencode-slim 插件')
+    expect(judgeInput).not.toContain('当前目录下都有哪些工程')
+  })
+
   it('parses completion judge JSON from fenced model output', () => {
     expect(parseCompletionJudgeDecision('```json\n{"status":"incomplete","next_expectation":"tool_call"}\n```')).toEqual({
       status: 'incomplete',

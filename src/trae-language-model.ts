@@ -25,7 +25,7 @@ import {
   shouldRetryStoppedActionTurn,
   type CompletionJudgeDecision,
 } from './agent-loop/completion-judge.js'
-import { getFirstUserText, iterToolDefinitions, listToolNames, normalizeToolName, serializeToolOutput } from './agent-loop/prompt-utils.js'
+import { getLatestUserText, iterToolDefinitions, listToolNames, normalizeToolName, serializeToolOutput } from './agent-loop/prompt-utils.js'
 import { applyToolDelta } from './agent-loop/tool-delta.js'
 import { emitToolCalls as emitOpenCodeToolCalls, type FunctionToolCall } from './integrations/opencode/stream-events.js'
 import type { TraeProviderOptions } from './providers/trae/options.js'
@@ -221,7 +221,7 @@ export class TraeLanguageModel implements LanguageModelV2 {
               maxChars: this.providerOptions?.maxPromptChars ?? 12000,
               maxToolPayloadChars: this.providerOptions?.maxToolPayloadChars,
               systemPreamble: resolveSystemPreamble(this.providerOptions, options.tools),
-              taskReminder: this.providerOptions?.enableToolCalling === true ? getFirstUserText(options) : undefined,
+              taskReminder: this.providerOptions?.enableToolCalling === true ? getLatestUserText(options) : undefined,
             }),
             queryTimeout: this.providerOptions?.queryTimeout,
             sessionId: this.providerOptions?.sessionId,
@@ -544,7 +544,7 @@ function withTransportPromptGuidance(
       ...buildPostToolAnswerGuidance(options),
       {
         role: 'user',
-        content: [{ type: 'text', text: `Current task reminder:\n${getFirstUserText(options)}` }],
+        content: [{ type: 'text', text: `Current task reminder:\n${getLatestUserText(options)}` }],
       },
     ] as LanguageModelV2CallOptions['prompt'],
   }
@@ -912,7 +912,7 @@ function routeConcreteCodingContextReads(
   options: LanguageModelV2CallOptions,
   toolNames: Set<string>,
 ): ReturnType<typeof extractFunctionToolCalls> {
-  const userText = getFirstUserText(options)
+  const userText = getLastUserText(options)
   if (!isPackageScriptTddContextRequest(userText)) return []
   const results = collectToolResults(options)
   const testFiles = parseToolResultFileList(results.get('trae-router-context-find-tests'))

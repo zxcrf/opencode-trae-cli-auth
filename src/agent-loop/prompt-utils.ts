@@ -22,6 +22,20 @@ export function getFirstUserText(options: LanguageModelV2CallOptions): string {
   return ''
 }
 
+export function getLatestUserText(options: LanguageModelV2CallOptions): string {
+  const prompt = options.prompt ?? []
+  for (let i = prompt.length - 1; i >= 0; i -= 1) {
+    const message = prompt[i]
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue
+    return message.content.map((part) => {
+      if (!part || typeof part !== 'object') return ''
+      const rec = part as Record<string, unknown>
+      return rec.type === 'text' && typeof rec.text === 'string' ? rec.text : ''
+    }).join('\n')
+  }
+  return ''
+}
+
 export function collectRecentToolResults(options: LanguageModelV2CallOptions): Array<{ id: string; toolName: string; output: string }> {
   const results: Array<{ id: string; toolName: string; output: string }> = []
   for (const message of options.prompt ?? []) {
