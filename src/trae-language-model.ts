@@ -16,48 +16,21 @@ import { contentToText } from './cli/text-content.js'
 import { mapUsage } from './cli/usage.js'
 import { runCliLlmStreaming } from './cli/cli-runner.js'
 import { TRAE_CLOUD_MODEL_IDS } from './models.js'
-import { streamOpenAIChatCompletions, type OpenAIStreamToolDelta } from './openai-transport.js'
-import { streamTraeRawChat, type TraeRawStreamToolDelta } from './trae-raw-transport.js'
+import { streamOpenAIChatCompletions } from './openai-transport.js'
+import { streamTraeRawChat } from './trae-raw-transport.js'
+import {
+  buildCompletionJudgePrompt,
+  buildJudgeSessionId,
+  parseCompletionJudgeDecision,
+  shouldRetryStoppedActionTurn,
+  type CompletionJudgeDecision,
+} from './agent-loop/completion-judge.js'
+import { getFirstUserText, iterToolDefinitions, listToolNames, normalizeToolName, serializeToolOutput } from './agent-loop/prompt-utils.js'
+import { applyToolDelta } from './agent-loop/tool-delta.js'
+import { emitToolCalls as emitOpenCodeToolCalls, type FunctionToolCall } from './integrations/opencode/stream-events.js'
+import type { TraeProviderOptions } from './providers/trae/options.js'
 
-export type TraeProviderOptions = {
-  allowCliFallback?: boolean
-  cliPath?: string
-  pat?: string
-  traeRawBaseURL?: string
-  traeRawApiKey?: string
-  traeRawHeaders?: Record<string, string>
-  traeRawConfigName?: string
-  traeRawModelName?: string
-  openaiBaseURL?: string
-  openaiApiKey?: string
-  openaiHeaders?: Record<string, string>
-  modelName?: string
-  modelAliases?: Record<string, string>
-  enableToolCalling?: boolean
-  queryTimeout?: number
-  includeToolHistory?: boolean
-  maxPromptMessages?: number
-  maxPromptChars?: number
-  maxToolPayloadChars?: number
-  codingSystemPreamble?: string
-  injectCodingSystemPrompt?: boolean
-  extraArgs?: string[]
-  enforceTextOnly?: boolean
-  maxRetries?: number
-  retryDelayMs?: number
-  sessionId?: string
-}
-
-type StopRetryDecision = {
-  shouldRetry: boolean
-  retryPrompt?: LanguageModelV2CallOptions
-}
-
-type CompletionJudgeDecision = {
-  status: 'complete' | 'incomplete' | 'needs_user'
-  reason?: string
-  nextExpectation?: 'final_answer' | 'tool_call' | 'clarification'
-}
+export type { TraeProviderOptions } from './providers/trae/options.js'
 
 const LEGACY_MODEL_ALIASES: Record<string, string> = {
   default: 'GLM-5.1',
@@ -392,7 +365,7 @@ async function streamTraeRawTransport(args: {
       if (event.type === 'tool-call-delta') {
         sawRawOutput = true
         sawOutput = true
-        applyTraeRawToolDelta(toolCalls, event)
+        applyToolDelta(toolCalls, event)
         continue
       }
       if (event.type === 'finish') {
@@ -495,7 +468,7 @@ async function streamOpenAITransport(args: {
         continue
       }
       if (event.type === 'tool-call-delta') {
-        applyOpenAIToolDelta(toolCalls, event)
+        applyToolDelta(toolCalls, event)
         continue
       }
       if (event.type === 'finish') {
@@ -660,144 +633,12 @@ function withEmptyToolContainerRetryPrompt(options: LanguageModelV2CallOptions):
   }
 }
 
-function withStoppedActionRetryPrompt(options: LanguageModelV2CallOptions): LanguageModelV2CallOptions {
-  return {
-    ...options,
-    prompt: [
-      {
-        role: 'system',
-        content: [
-          'The completion judge marked your previous response as incomplete for the original OpenCode task.',
-          'Retry now.',
-          'If the task still needs filesystem, shell, edit, write, glob, grep, read, or task actions, output exactly one concrete <opencode_tool_call> JSON block and no other text.',
-          'If enough evidence is already available, answer with the final user-facing result.',
-          'If user input is required, ask one concise clarification question.',
-        ].join(' '),
-      },
-      ...(options.prompt ?? []),
-    ],
-  }
-}
-
-function buildCompletionJudgePrompt(args: {
-  options: LanguageModelV2CallOptions
-  assistantText: string
-}): LanguageModelV2CallOptions {
-  const toolNames = listToolNames(args.options.tools)
-  const toolResultSummary = collectRecentToolResults(args.options).slice(-3).map((entry) => `${entry.toolName}[${entry.id}]: ${clipText(entry.output, 400)}`).join('\n')
-  const userGoal = getFirstUserText(args.options)
-  return {
-    ...args.options,
-    tools: undefined,
-    prompt: [
-      {
-        role: 'system',
-        content: [
-          'You are a task completion judge for an OpenCode agent loop.',
-          'Return strict JSON only.',
-          'Schema: {"status":"complete"|"incomplete"|"needs_user","reason":"short explanation","next_expectation":"final_answer"|"tool_call"|"clarification"}',
-          'Judge whether assistant_output satisfies user_goal, using recent_tool_results as execution evidence.',
-          'Use "complete" only when the assistant output is a user-facing final answer that satisfies the original goal.',
-          'Use "incomplete" when the assistant output is a plan, promise, intermediate status, unexecuted next step, or fails to consume tool results.',
-          'Use "needs_user" only when progress requires user choice, credentials, permission, or clarification.',
-          'For action tasks such as modify, install, upgrade, run, write, or verify, completion requires evidence that the action was executed or a clear explanation of why it cannot be completed.',
-          'A tool result by itself is not a final answer unless assistant_output explains the result to the user.',
-          'Never request tools. Never explain outside JSON.',
-        ].join(' '),
-      },
-      {
-        role: 'user',
-        content: [{
-          type: 'text',
-          text: [
-            'completion judge',
-            `user_goal:\n${userGoal || '(empty)'}`,
-            `assistant_output:\n${args.assistantText || '(empty)'}`,
-            `available_tools:\n${toolNames.join(', ') || '(none)'}`,
-            `recent_tool_results:\n${toolResultSummary || '(none)'}`,
-          ].join('\n\n'),
-        }],
-      },
-    ],
-  }
-}
-
-function parseCompletionJudgeDecision(text: string): CompletionJudgeDecision | undefined {
-  const parsed = parseJsonObjectLenient(text)
-  if (!parsed) return undefined
-  const rawStatus = parsed.status ?? parsed.action
-  const status = rawStatus === 'stop' ? 'complete' : rawStatus === 'continue' ? 'incomplete' : rawStatus
-  if (status !== 'complete' && status !== 'incomplete' && status !== 'needs_user') return undefined
-  const rawNextExpectation = parsed.next_expectation ?? parsed.nextExpectation
-  const nextExpectation = rawNextExpectation === 'final_answer' || rawNextExpectation === 'tool_call' || rawNextExpectation === 'clarification'
-    ? rawNextExpectation
-    : undefined
-  return {
-    status,
-    reason: typeof parsed.reason === 'string' ? parsed.reason : undefined,
-    nextExpectation,
-  }
-}
-
-function buildJudgeSessionId(sessionId: string | undefined): string {
-  const suffix = `judge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  return sessionId ? `${sessionId}-${suffix}` : suffix
-}
-
-function shouldRetryStoppedActionTurn(args: {
-  options: LanguageModelV2CallOptions
-  text: string
-  finishReason: 'stop' | 'tool-calls' | 'error'
-  sawOutput: boolean
-  toolCalls: number
-  judgeDecision?: CompletionJudgeDecision
-}): StopRetryDecision {
-  if (args.finishReason !== 'stop') return { shouldRetry: false }
-  if (args.toolCalls > 0) return { shouldRetry: false }
-  if (!args.sawOutput || !args.text.trim()) return { shouldRetry: false }
-  if (!args.judgeDecision || args.judgeDecision.status !== 'incomplete') return { shouldRetry: false }
-  return {
-    shouldRetry: true,
-    retryPrompt: withStoppedActionRetryPrompt(args.options),
-  }
-}
-
 function hasOpenAITransport(options: TraeProviderOptions): boolean {
   return !!(options.openaiBaseURL && options.openaiApiKey)
 }
 
 function hasTraeRawTransport(options: TraeProviderOptions): boolean {
   return !!(options.traeRawBaseURL && (options.traeRawApiKey || options.pat))
-}
-
-function applyTraeRawToolDelta(
-  toolCalls: Map<number, { id: string; name: string; input: string }>,
-  delta: TraeRawStreamToolDelta,
-): void {
-  const current = toolCalls.get(delta.index) ?? {
-    id: delta.id ?? `call_${delta.index}`,
-    name: delta.name ?? '',
-    input: '',
-  }
-  if (delta.id) current.id = delta.id
-  if (delta.name) current.name = delta.name
-  if (delta.argumentsDelta) current.input += delta.argumentsDelta
-  toolCalls.set(delta.index, current)
-}
-
-function applyOpenAIToolDelta(
-  toolCalls: Map<number, { id: string; name: string; input: string }>,
-  delta: OpenAIStreamToolDelta,
-): void {
-  const current = toolCalls.get(delta.index) ?? {
-    id: delta.id ?? `call_${delta.index}`,
-    name: delta.name ?? '',
-    input: '',
-  }
-  if (delta.id) current.id = delta.id
-  if (delta.name) current.name = delta.name
-  if (delta.argumentsDelta) current.input += delta.argumentsDelta
-  toolCalls.set(delta.index, current)
 }
 
 function resolveTraeModelName(modelId: string, options?: TraeProviderOptions): string | undefined {
@@ -857,26 +698,15 @@ function nextTextDelta(previous: string, next: string): string {
 
 function emitToolCalls(
   controller: ReadableStreamDefaultController<LanguageModelV2StreamPart>,
-  toolCalls: ReturnType<typeof extractFunctionToolCalls>,
+  toolCalls: FunctionToolCall[],
   toolSchemaHints: Record<string, Set<string>>,
 ): number {
-  let emitted = 0
-  for (const call of toolCalls) {
-    const toolName = normalizeToolName(call.name)
-    const normalizedInput = normalizeToolInput(toolName, call.input, toolSchemaHints[toolName])
-    if (isBlockedInternalReferenceToolCall(toolName, normalizedInput)) continue
-    controller.enqueue({ type: 'tool-input-start', id: call.id, toolName } as LanguageModelV2StreamPart)
-    controller.enqueue({ type: 'tool-input-delta', id: call.id, delta: normalizedInput } as LanguageModelV2StreamPart)
-    controller.enqueue({ type: 'tool-input-end', id: call.id } as LanguageModelV2StreamPart)
-    controller.enqueue({
-      type: 'tool-call',
-      toolCallId: call.id,
-      toolName,
-      input: normalizedInput,
-    } as LanguageModelV2StreamPart)
-    emitted += 1
-  }
-  return emitted
+  return emitOpenCodeToolCalls(
+    controller,
+    toolCalls,
+    (toolName, input) => normalizeToolInput(toolName, input, toolSchemaHints[toolName]),
+    isBlockedInternalReferenceToolCall,
+  )
 }
 
 function isBlockedInternalReferenceToolCall(toolName: string, input: string): boolean {
@@ -920,16 +750,6 @@ function extractToolCalls(result: TraeCliResult): ReturnType<typeof extractFunct
   const textCalls = extractTextToolCalls(result.message?.content)
   if (textCalls.length > 0) return textCalls
   return extractFunctionToolCalls(result)
-}
-
-function listToolNames(tools: LanguageModelV2CallOptions['tools']): string[] {
-  const names: string[] = []
-  for (const rec of iterToolDefinitions(tools)) {
-    if (rec.type !== 'function') continue
-    const name = String(rec.name ?? '').trim()
-    if (name) names.push(name)
-  }
-  return [...new Set(names)]
 }
 
 function zeroUsage(): LanguageModelV2Usage {
@@ -1213,44 +1033,6 @@ function collectToolResults(options: LanguageModelV2CallOptions): Map<string, st
   return results
 }
 
-function collectToolResultsByName(options: LanguageModelV2CallOptions, toolName: string): Array<{ id: string; output: string }> {
-  const results: Array<{ id: string; output: string }> = []
-  const normalizedToolName = normalizeToolName(toolName)
-  for (const message of options.prompt ?? []) {
-    if (message.role !== 'tool' || !Array.isArray(message.content)) continue
-    for (const part of message.content) {
-      if (!part || typeof part !== 'object') continue
-      const rec = part as Record<string, unknown>
-      if (rec.type !== 'tool-result') continue
-      if (normalizeToolName(String(rec.toolName ?? '')) !== normalizedToolName) continue
-      const id = String(rec.toolCallId ?? '')
-      if (!id) continue
-      results.push({ id, output: serializeToolOutput(rec.output) })
-    }
-  }
-  return results
-}
-
-function collectRecentToolResults(options: LanguageModelV2CallOptions): Array<{ id: string; toolName: string; output: string }> {
-  const results: Array<{ id: string; toolName: string; output: string }> = []
-  for (const message of options.prompt ?? []) {
-    if (message.role !== 'tool' || !Array.isArray(message.content)) continue
-    for (const part of message.content) {
-      if (!part || typeof part !== 'object') continue
-      const rec = part as Record<string, unknown>
-      if (rec.type !== 'tool-result') continue
-      const id = String(rec.toolCallId ?? '')
-      if (!id) continue
-      results.push({
-        id,
-        toolName: normalizeToolName(String(rec.toolName ?? '')),
-        output: serializeToolOutput(rec.output),
-      })
-    }
-  }
-  return results
-}
-
 function isManifestListRequest(text: string): boolean {
   const lower = text.toLowerCase()
   return lower.includes('package.json') && lower.includes('readme') && (
@@ -1276,35 +1058,6 @@ function parseJsonObject(text: string): Record<string, unknown> | undefined {
   } catch {
     return undefined
   }
-}
-
-function parseJsonObjectLenient(text: string): Record<string, unknown> | undefined {
-  const direct = parseJsonObject(text.trim())
-  if (direct) return direct
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1]
-  if (fenced) {
-    const parsed = parseJsonObject(fenced.trim())
-    if (parsed) return parsed
-  }
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start >= 0 && end > start) {
-    return parseJsonObject(text.slice(start, end + 1).trim())
-  }
-  return undefined
-}
-
-function clipText(text: string, maxChars: number): string {
-  return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text
-}
-
-function serializeToolOutput(output: unknown): string {
-  if (typeof output === 'string') return output
-  if (!output || typeof output !== 'object') return String(output ?? '')
-  const rec = output as Record<string, unknown>
-  if (rec.type === 'text' && typeof rec.value === 'string') return rec.value
-  if (rec.type === 'json') return JSON.stringify(rec.value)
-  return JSON.stringify(output)
 }
 
 function parseToolResultFileList(output: string | undefined): string[] {
@@ -1350,18 +1103,6 @@ function getLastUserText(options: LanguageModelV2CallOptions): string {
   const prompt = options.prompt ?? []
   for (let i = prompt.length - 1; i >= 0; i -= 1) {
     const message = prompt[i]
-    if (message.role !== 'user' || !Array.isArray(message.content)) continue
-    return message.content.map((part) => {
-      if (!part || typeof part !== 'object') return ''
-      const rec = part as Record<string, unknown>
-      return rec.type === 'text' && typeof rec.text === 'string' ? rec.text : ''
-    }).join('\n')
-  }
-  return ''
-}
-
-function getFirstUserText(options: LanguageModelV2CallOptions): string {
-  for (const message of options.prompt ?? []) {
     if (message.role !== 'user' || !Array.isArray(message.content)) continue
     return message.content.map((part) => {
       if (!part || typeof part !== 'object') return ''
@@ -1725,19 +1466,6 @@ function buildToolSchemaHints(tools: LanguageModelV2CallOptions['tools']): Recor
   return map
 }
 
-function iterToolDefinitions(tools: LanguageModelV2CallOptions['tools']): Record<string, unknown>[] {
-  if (!tools) return []
-  if (Array.isArray(tools)) {
-    return tools.filter((tool): tool is Record<string, unknown> => !!tool && typeof tool === 'object')
-  }
-  if (typeof tools !== 'object') return []
-  return Object.entries(tools as Record<string, unknown>).flatMap(([name, tool]) => {
-    if (!tool || typeof tool !== 'object') return []
-    const rec = tool as Record<string, unknown>
-    return [{ ...rec, name: typeof rec.name === 'string' && rec.name ? rec.name : name }]
-  })
-}
-
 function extractSchemaFields(schema: unknown): Set<string> {
   if (!schema || typeof schema !== 'object') return new Set()
   const rec = schema as Record<string, unknown>
@@ -1753,27 +1481,4 @@ function extractSchemaFields(schema: unknown): Set<string> {
     }
   }
   return new Set()
-}
-
-function normalizeToolName(name: string): string {
-  const lower = name.toLowerCase()
-  if (lower === 'askuserquestion') return 'question'
-  if (lower === 'agent') return 'task'
-  if (lower === 'exitplanmode') return 'plan_exit'
-  if (lower === 'str_replace_based_edit_tool') return 'edit'
-  if (lower === 'readfile') return 'read'
-  if (lower === 'writefile') return 'write'
-  if (lower === 'ls' || lower === 'listfiles' || lower === 'list_files' || lower === 'listdir' || lower === 'list_dir') return 'glob'
-  if (lower === 'runbash' || lower === 'bashcommand') return 'bash'
-  if (lower.startsWith('mcp__')) {
-    const withoutPrefix = lower.slice(5)
-    const separatorIdx = withoutPrefix.indexOf('__')
-    if (separatorIdx > 0) {
-      const serverName = withoutPrefix.slice(0, separatorIdx)
-      const toolName = withoutPrefix.slice(separatorIdx + 2)
-      return `${serverName}_${toolName}`
-    }
-    return withoutPrefix
-  }
-  return lower
 }
