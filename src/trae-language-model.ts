@@ -48,6 +48,17 @@ export type TraeProviderOptions = {
   sessionId?: string
 }
 
+type StopRetryDecision = {
+  shouldRetry: boolean
+  retryPrompt?: LanguageModelV2CallOptions
+}
+
+type CompletionJudgeDecision = {
+  status: 'complete' | 'incomplete' | 'needs_user'
+  reason?: string
+  nextExpectation?: 'final_answer' | 'tool_call' | 'clarification'
+}
+
 const LEGACY_MODEL_ALIASES: Record<string, string> = {
   default: 'GLM-5.1',
   fast: 'MiniMax-M2.7',
@@ -353,10 +364,13 @@ async function streamTraeRawTransport(args: {
   const toolCalls = new Map<number, { id: string; name: string; input: string }>()
   let attempt = 0
   let transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
-  while (attempt < 2) {
+  while (attempt < 3) {
     let sawOutput = false
     let sawRawOutput = false
     let retried = false
+    let attemptText = ''
+    const bufferedTextDeltas: string[] = []
+    toolCalls.clear()
     for await (const event of streamTraeRawChat({
       baseURL: args.providerOptions.traeRawBaseURL!,
       apiKey: args.providerOptions.traeRawApiKey!,
@@ -371,11 +385,8 @@ async function streamTraeRawTransport(args: {
       if (event.type === 'text-delta') {
         sawRawOutput = true
         sawOutput = true
-        if (!textStarted) {
-          args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
-          textStarted = true
-        }
-        args.controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: event.delta })
+        attemptText += event.delta
+        bufferedTextDeltas.push(event.delta)
         continue
       }
       if (event.type === 'tool-call-delta') {
@@ -392,6 +403,36 @@ async function streamTraeRawTransport(args: {
           transportOptions = withEmptyToolContainerRetryPrompt(transportOptions)
           retried = true
           break
+        }
+        const judgeDecision = attemptText.trim()
+          ? await judgeCompletionViaRawTransport({
+            options: args.options,
+            providerOptions: args.providerOptions,
+            selectedModel: args.selectedModel,
+            assistantText: attemptText,
+          })
+          : undefined
+        const stopRetry = shouldRetryStoppedActionTurn({
+          options: args.options,
+          text: attemptText,
+          finishReason: event.finishReason,
+          sawOutput,
+          toolCalls: toolCalls.size,
+          judgeDecision,
+        })
+        if (stopRetry.shouldRetry && stopRetry.retryPrompt) {
+          transportOptions = withTransportPromptGuidance(stopRetry.retryPrompt, args.providerOptions)
+          retried = true
+          break
+        }
+        if (bufferedTextDeltas.length > 0) {
+          if (!textStarted) {
+            args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
+            textStarted = true
+          }
+          for (const delta of bufferedTextDeltas) {
+            args.controller.enqueue({ type: 'text-delta', id: 'trae-0', delta })
+          }
         }
         if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
         if (toolCalls.size > 0) {
@@ -416,6 +457,7 @@ async function streamTraeRawTransport(args: {
     }
     if (!retried) break
     attempt += 1
+    textStarted = false
   }
 }
 
@@ -433,47 +475,85 @@ async function streamOpenAITransport(args: {
   })
   let textStarted = false
   const toolCalls = new Map<number, { id: string; name: string; input: string }>()
-  const transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
-  for await (const event of streamOpenAIChatCompletions({
-    baseURL: args.providerOptions.openaiBaseURL!,
-    apiKey: args.providerOptions.openaiApiKey!,
-    headers: args.providerOptions.openaiHeaders,
-    modelName: args.selectedModel ?? args.providerOptions.modelName ?? stripProviderPrefix(args.modelId),
-    abortSignal: args.options.abortSignal,
-  }, transportOptions)) {
-    if (event.type === 'text-delta') {
-      if (!textStarted) {
-        args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
-        textStarted = true
+  let transportOptions = withTransportPromptGuidance(args.options, args.providerOptions)
+  let attempt = 0
+  while (attempt < 2) {
+    let retried = false
+    let attemptText = ''
+    const bufferedTextDeltas: string[] = []
+    toolCalls.clear()
+    for await (const event of streamOpenAIChatCompletions({
+      baseURL: args.providerOptions.openaiBaseURL!,
+      apiKey: args.providerOptions.openaiApiKey!,
+      headers: args.providerOptions.openaiHeaders,
+      modelName: args.selectedModel ?? args.providerOptions.modelName ?? stripProviderPrefix(args.modelId),
+      abortSignal: args.options.abortSignal,
+    }, transportOptions)) {
+      if (event.type === 'text-delta') {
+        attemptText += event.delta
+        bufferedTextDeltas.push(event.delta)
+        continue
       }
-      args.controller.enqueue({ type: 'text-delta', id: 'trae-0', delta: event.delta })
-      continue
-    }
-    if (event.type === 'tool-call-delta') {
-      applyOpenAIToolDelta(toolCalls, event)
-      continue
-    }
-    if (event.type === 'finish') {
-      if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
-      if (toolCalls.size > 0) {
-        const emittedToolCalls = emitToolCalls(
-          args.controller,
-          [...toolCalls.values()].map((call) => ({
-            id: call.id,
-            name: call.name,
-            input: call.input,
-          })),
-          args.toolSchemaHints,
-        )
-        if (emittedToolCalls === 0) toolCalls.clear()
+      if (event.type === 'tool-call-delta') {
+        applyOpenAIToolDelta(toolCalls, event)
+        continue
       }
-      args.controller.enqueue({
-        type: 'finish',
-        finishReason: decorateFinishReason(toolCalls.size > 0 ? 'tool-calls' : event.finishReason),
-        usage: event.usage ?? zeroUsage(),
-      })
-      return
+      if (event.type === 'finish') {
+        const judgeDecision = attemptText.trim()
+          ? await judgeCompletionViaOpenAITransport({
+            options: args.options,
+            providerOptions: args.providerOptions,
+            modelId: args.modelId,
+            selectedModel: args.selectedModel,
+            assistantText: attemptText,
+          })
+          : undefined
+        const stopRetry = shouldRetryStoppedActionTurn({
+          options: args.options,
+          text: attemptText,
+          finishReason: event.finishReason,
+          sawOutput: attemptText.length > 0,
+          toolCalls: toolCalls.size,
+          judgeDecision,
+        })
+        if (stopRetry.shouldRetry && stopRetry.retryPrompt) {
+          transportOptions = withTransportPromptGuidance(stopRetry.retryPrompt, args.providerOptions)
+          retried = true
+          break
+        }
+        if (bufferedTextDeltas.length > 0) {
+          if (!textStarted) {
+            args.controller.enqueue({ type: 'text-start', id: 'trae-0' })
+            textStarted = true
+          }
+          for (const delta of bufferedTextDeltas) {
+            args.controller.enqueue({ type: 'text-delta', id: 'trae-0', delta })
+          }
+        }
+        if (textStarted) args.controller.enqueue({ type: 'text-end', id: 'trae-0' })
+        if (toolCalls.size > 0) {
+          const emittedToolCalls = emitToolCalls(
+            args.controller,
+            [...toolCalls.values()].map((call) => ({
+              id: call.id,
+              name: call.name,
+              input: call.input,
+            })),
+            args.toolSchemaHints,
+          )
+          if (emittedToolCalls === 0) toolCalls.clear()
+        }
+        args.controller.enqueue({
+          type: 'finish',
+          finishReason: decorateFinishReason(toolCalls.size > 0 ? 'tool-calls' : event.finishReason),
+          usage: event.usage ?? zeroUsage(),
+        })
+        return
+      }
     }
+    if (!retried) break
+    attempt += 1
+    textStarted = false
   }
 }
 
@@ -495,6 +575,55 @@ function withTransportPromptGuidance(
       },
     ] as LanguageModelV2CallOptions['prompt'],
   }
+}
+
+async function judgeCompletionViaRawTransport(args: {
+  options: LanguageModelV2CallOptions
+  providerOptions: TraeProviderOptions
+  selectedModel?: string
+  assistantText: string
+}): Promise<CompletionJudgeDecision | undefined> {
+  let text = ''
+  for await (const event of streamTraeRawChat({
+    baseURL: args.providerOptions.traeRawBaseURL!,
+    apiKey: args.providerOptions.traeRawApiKey!,
+    pat: args.providerOptions.pat,
+    headers: args.providerOptions.traeRawHeaders,
+    modelName: args.selectedModel ?? args.providerOptions.modelName,
+    configName: args.providerOptions.traeRawConfigName,
+    rawModelName: args.providerOptions.traeRawModelName,
+    sessionId: buildJudgeSessionId(args.providerOptions.sessionId),
+    abortSignal: args.options.abortSignal,
+  }, buildCompletionJudgePrompt({
+    options: args.options,
+    assistantText: args.assistantText,
+  }))) {
+    if (event.type === 'text-delta') text += event.delta
+  }
+  return parseCompletionJudgeDecision(text)
+}
+
+async function judgeCompletionViaOpenAITransport(args: {
+  options: LanguageModelV2CallOptions
+  providerOptions: TraeProviderOptions
+  modelId: string
+  selectedModel?: string
+  assistantText: string
+}): Promise<CompletionJudgeDecision | undefined> {
+  let text = ''
+  for await (const event of streamOpenAIChatCompletions({
+    baseURL: args.providerOptions.openaiBaseURL!,
+    apiKey: args.providerOptions.openaiApiKey!,
+    headers: args.providerOptions.openaiHeaders,
+    modelName: args.selectedModel ?? args.providerOptions.modelName ?? stripProviderPrefix(args.modelId),
+    abortSignal: args.options.abortSignal,
+  }, buildCompletionJudgePrompt({
+    options: args.options,
+    assistantText: args.assistantText,
+  }))) {
+    if (event.type === 'text-delta') text += event.delta
+  }
+  return parseCompletionJudgeDecision(text)
 }
 
 function buildPostToolAnswerGuidance(options: LanguageModelV2CallOptions): LanguageModelV2CallOptions['prompt'] {
@@ -528,6 +657,108 @@ function withEmptyToolContainerRetryPrompt(options: LanguageModelV2CallOptions):
       },
       ...(options.prompt ?? []),
     ],
+  }
+}
+
+function withStoppedActionRetryPrompt(options: LanguageModelV2CallOptions): LanguageModelV2CallOptions {
+  return {
+    ...options,
+    prompt: [
+      {
+        role: 'system',
+        content: [
+          'The completion judge marked your previous response as incomplete for the original OpenCode task.',
+          'Retry now.',
+          'If the task still needs filesystem, shell, edit, write, glob, grep, read, or task actions, output exactly one concrete <opencode_tool_call> JSON block and no other text.',
+          'If enough evidence is already available, answer with the final user-facing result.',
+          'If user input is required, ask one concise clarification question.',
+        ].join(' '),
+      },
+      ...(options.prompt ?? []),
+    ],
+  }
+}
+
+function buildCompletionJudgePrompt(args: {
+  options: LanguageModelV2CallOptions
+  assistantText: string
+}): LanguageModelV2CallOptions {
+  const toolNames = listToolNames(args.options.tools)
+  const toolResultSummary = collectRecentToolResults(args.options).slice(-3).map((entry) => `${entry.toolName}[${entry.id}]: ${clipText(entry.output, 400)}`).join('\n')
+  const userGoal = getFirstUserText(args.options)
+  return {
+    ...args.options,
+    tools: undefined,
+    prompt: [
+      {
+        role: 'system',
+        content: [
+          'You are a task completion judge for an OpenCode agent loop.',
+          'Return strict JSON only.',
+          'Schema: {"status":"complete"|"incomplete"|"needs_user","reason":"short explanation","next_expectation":"final_answer"|"tool_call"|"clarification"}',
+          'Judge whether assistant_output satisfies user_goal, using recent_tool_results as execution evidence.',
+          'Use "complete" only when the assistant output is a user-facing final answer that satisfies the original goal.',
+          'Use "incomplete" when the assistant output is a plan, promise, intermediate status, unexecuted next step, or fails to consume tool results.',
+          'Use "needs_user" only when progress requires user choice, credentials, permission, or clarification.',
+          'For action tasks such as modify, install, upgrade, run, write, or verify, completion requires evidence that the action was executed or a clear explanation of why it cannot be completed.',
+          'A tool result by itself is not a final answer unless assistant_output explains the result to the user.',
+          'Never request tools. Never explain outside JSON.',
+        ].join(' '),
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: [
+            'completion judge',
+            `user_goal:\n${userGoal || '(empty)'}`,
+            `assistant_output:\n${args.assistantText || '(empty)'}`,
+            `available_tools:\n${toolNames.join(', ') || '(none)'}`,
+            `recent_tool_results:\n${toolResultSummary || '(none)'}`,
+          ].join('\n\n'),
+        }],
+      },
+    ],
+  }
+}
+
+function parseCompletionJudgeDecision(text: string): CompletionJudgeDecision | undefined {
+  const parsed = parseJsonObjectLenient(text)
+  if (!parsed) return undefined
+  const rawStatus = parsed.status ?? parsed.action
+  const status = rawStatus === 'stop' ? 'complete' : rawStatus === 'continue' ? 'incomplete' : rawStatus
+  if (status !== 'complete' && status !== 'incomplete' && status !== 'needs_user') return undefined
+  const rawNextExpectation = parsed.next_expectation ?? parsed.nextExpectation
+  const nextExpectation = rawNextExpectation === 'final_answer' || rawNextExpectation === 'tool_call' || rawNextExpectation === 'clarification'
+    ? rawNextExpectation
+    : undefined
+  return {
+    status,
+    reason: typeof parsed.reason === 'string' ? parsed.reason : undefined,
+    nextExpectation,
+  }
+}
+
+function buildJudgeSessionId(sessionId: string | undefined): string {
+  const suffix = `judge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  return sessionId ? `${sessionId}-${suffix}` : suffix
+}
+
+function shouldRetryStoppedActionTurn(args: {
+  options: LanguageModelV2CallOptions
+  text: string
+  finishReason: 'stop' | 'tool-calls' | 'error'
+  sawOutput: boolean
+  toolCalls: number
+  judgeDecision?: CompletionJudgeDecision
+}): StopRetryDecision {
+  if (args.finishReason !== 'stop') return { shouldRetry: false }
+  if (args.toolCalls > 0) return { shouldRetry: false }
+  if (!args.sawOutput || !args.text.trim()) return { shouldRetry: false }
+  if (!args.judgeDecision || args.judgeDecision.status !== 'incomplete') return { shouldRetry: false }
+  return {
+    shouldRetry: true,
+    retryPrompt: withStoppedActionRetryPrompt(args.options),
   }
 }
 
@@ -1000,6 +1231,26 @@ function collectToolResultsByName(options: LanguageModelV2CallOptions, toolName:
   return results
 }
 
+function collectRecentToolResults(options: LanguageModelV2CallOptions): Array<{ id: string; toolName: string; output: string }> {
+  const results: Array<{ id: string; toolName: string; output: string }> = []
+  for (const message of options.prompt ?? []) {
+    if (message.role !== 'tool' || !Array.isArray(message.content)) continue
+    for (const part of message.content) {
+      if (!part || typeof part !== 'object') continue
+      const rec = part as Record<string, unknown>
+      if (rec.type !== 'tool-result') continue
+      const id = String(rec.toolCallId ?? '')
+      if (!id) continue
+      results.push({
+        id,
+        toolName: normalizeToolName(String(rec.toolName ?? '')),
+        output: serializeToolOutput(rec.output),
+      })
+    }
+  }
+  return results
+}
+
 function isManifestListRequest(text: string): boolean {
   const lower = text.toLowerCase()
   return lower.includes('package.json') && lower.includes('readme') && (
@@ -1025,6 +1276,22 @@ function parseJsonObject(text: string): Record<string, unknown> | undefined {
   } catch {
     return undefined
   }
+}
+
+function parseJsonObjectLenient(text: string): Record<string, unknown> | undefined {
+  const direct = parseJsonObject(text.trim())
+  if (direct) return direct
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1]
+  if (fenced) {
+    const parsed = parseJsonObject(fenced.trim())
+    if (parsed) return parsed
+  }
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    return parseJsonObject(text.slice(start, end + 1).trim())
+  }
+  return undefined
 }
 
 function clipText(text: string, maxChars: number): string {

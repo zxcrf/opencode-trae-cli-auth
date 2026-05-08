@@ -254,6 +254,40 @@ describe('text tool-call protocol', () => {
     expect(stripTextToolCallBlocks(content)).toBe('')
   })
 
+  it('extracts simple bash XML blocks with JSON bodies', () => {
+    const content = [
+      '<bash>',
+      '{"id":"check-plugin","name":"bash","input":{"command":"cat /Users/liurui/.config/opencode/oh-my-opencode-slim.json"}}',
+      '</bash>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      {
+        id: 'check-plugin',
+        name: 'bash',
+        input: '{"command":"cat /Users/liurui/.config/opencode/oh-my-opencode-slim.json"}',
+      },
+    ])
+    expect(stripTextToolCallBlocks(content)).toBe('')
+  })
+
+  it('extracts simple bash XML blocks after explanatory text', () => {
+    const content = [
+      '先了解一下当前插件的安装情况和来源。',
+      '{"id":"check-plugin","name":"bash","input":{"command":"cat /Users/liurui/.config/opencode/oh-my-opencode-slim.json && echo ---"}}',
+      '</bash>',
+    ].join('\n')
+
+    expect(extractTextToolCalls(content)).toEqual([
+      {
+        id: 'check-plugin',
+        name: 'bash',
+        input: '{"command":"cat /Users/liurui/.config/opencode/oh-my-opencode-slim.json && echo ---"}',
+      },
+    ])
+    expect(stripTextToolCallBlocks(content)).toBe('先了解一下当前插件的安装情况和来源。')
+  })
+
   it('extracts named XML tool_call blocks as tool calls', () => {
     const content = [
       '<tool_call name="Bash">',

@@ -78,6 +78,8 @@ const TEXT_TOOL_CALL_RE = /<opencode_tool_call>\s*([\s\S]*?)\s*<\/opencode_tool_
 const TRAE_XML_TOOL_CALL_RE = /<tool_use>\s*([\s\S]*?)\s*<\/tool_use>/gi
 const TRAE_TOOL_CELL_RE = /<tool_cell\s+name=["']([^"']+)["']\s*>\s*([\s\S]*?)\s*<\/tool_cell>/gi
 const NAMED_TOOL_CALL_RE = /<tool_call\s+name=["']([^"']+)["']\s*>\s*([\s\S]*?)\s*<\/tool_call>/gi
+const SIMPLE_XML_JSON_TOOL_CALL_RE = /<(bash|read|write|edit|glob|grep|task)>\s*([\s\S]*?)\s*<\/\1>/gi
+const SIMPLE_XML_JSON_TOOL_CALL_CLOSE_RE = /(\{[\s\S]*?"(?:id|name|input|command|filePath|pattern)"[\s\S]*?\})\s*<\/(bash|read|write|edit|glob|grep|task)>/gi
 const KIMI_TOOL_PARAMETER_RE = /<tool>\s*([^\s<]+)\s*<\/tool>\s*<parameter>\s*([\s\S]*?)\s*<\/parameter>/gi
 const KIMI_INVOKE_PARAMETER_RE = /(?:<invoke>\s*)?([A-Za-z_][A-Za-z0-9_-]*)\s*<parameter=([A-Za-z_][A-Za-z0-9_-]*)>\s*([\s\S]*?)\s*<\/parameter>\s*<\/invoke>/gi
 const TRAE_COMPACT_TOOL_CALL_RE = /<tool_call>\s*([^\s<]+)\s*<\/arg_key>\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*([\s\S]*?)(?=\n---|\n<tool_call>|$)/gi
@@ -129,9 +131,21 @@ export function extractTextToolCalls(content: unknown): TraeFunctionToolCall[] {
     const parsed = parseTraeToolCellCall(match, calls.length)
     if (parsed) calls.push(parsed)
   }
+  SIMPLE_XML_JSON_TOOL_CALL_RE.lastIndex = 0
+  while ((match = SIMPLE_XML_JSON_TOOL_CALL_RE.exec(text))) {
+    const parsed = parseSimpleXmlJsonToolCall(match, calls.length)
+    if (parsed) calls.push(parsed)
+  }
   NAMED_TOOL_CALL_RE.lastIndex = 0
   while ((match = NAMED_TOOL_CALL_RE.exec(text))) {
     const parsed = parseNamedXmlToolCall(match, calls.length)
+    if (parsed) calls.push(parsed)
+  }
+  SIMPLE_XML_JSON_TOOL_CALL_CLOSE_RE.lastIndex = 0
+  while ((match = SIMPLE_XML_JSON_TOOL_CALL_CLOSE_RE.exec(text))) {
+    const prefix = text.slice(Math.max(0, match.index - 64), match.index)
+    if (/<(bash|read|write|edit|glob|grep|task)>\s*$/i.test(prefix)) continue
+    const parsed = parseSimpleXmlJsonToolCallTail(match, calls.length)
     if (parsed) calls.push(parsed)
   }
   KIMI_TOOL_PARAMETER_RE.lastIndex = 0
@@ -171,7 +185,9 @@ export function stripTextToolCallBlocks(content: unknown): string {
     .replace(TEXT_TOOL_CALL_RE, '')
     .replace(TRAE_XML_TOOL_CALL_RE, '')
     .replace(TRAE_TOOL_CELL_RE, '')
+    .replace(SIMPLE_XML_JSON_TOOL_CALL_RE, '')
     .replace(NAMED_TOOL_CALL_RE, '')
+    .replace(SIMPLE_XML_JSON_TOOL_CALL_CLOSE_RE, '')
     .replace(KIMI_TOOL_PARAMETER_RE, '')
     .replace(KIMI_INVOKE_PARAMETER_RE, '')
     .replace(TRAE_COMPACT_TOOL_CALL_RE, '')
@@ -246,6 +262,62 @@ function parseTraeToolCellCall(match: RegExpExecArray, index: number): TraeFunct
     id: `trae-text-tool-${index}`,
     name,
     input: stringifyToolInput(input),
+  }
+}
+
+function parseSimpleXmlJsonToolCall(match: RegExpExecArray, index: number): TraeFunctionToolCall | undefined {
+  const name = pickNonEmptyString(match[1])
+  const raw = pickNonEmptyString(match[2])
+  if (!name || !raw) return undefined
+  const normalized = parseSimpleXmlJsonToolInput(raw, name)
+  if (!normalized) return undefined
+  return {
+    id: normalized.id ?? `trae-text-tool-${index}`,
+    name: normalized.name ?? name,
+    input: normalized.input,
+  }
+}
+
+function parseSimpleXmlJsonToolCallTail(match: RegExpExecArray, index: number): TraeFunctionToolCall | undefined {
+  const raw = pickNonEmptyString(match[1])
+  const name = pickNonEmptyString(match[2])
+  if (!raw || !name) return undefined
+  const normalized = parseSimpleXmlJsonToolInput(raw, name)
+  if (!normalized) return undefined
+  return {
+    id: normalized.id ?? `trae-text-tool-${index}`,
+    name: normalized.name ?? name,
+    input: normalized.input,
+  }
+}
+
+function parseSimpleXmlJsonToolInput(
+  raw: string,
+  fallbackName: string,
+): { id?: string; name?: string; input: string } | undefined {
+  try {
+    const parsed = JSON.parse(raw.trim()) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const id = pickNonEmptyString(parsed.id)
+    const name = pickNonEmptyString(parsed.name) ?? fallbackName
+    const nestedInput = parsed.input
+    if (nestedInput && typeof nestedInput === 'object' && !Array.isArray(nestedInput)) {
+      return {
+        id,
+        name,
+        input: JSON.stringify(nestedInput),
+      }
+    }
+    const copy = { ...parsed }
+    delete copy.id
+    delete copy.name
+    return {
+      id,
+      name,
+      input: JSON.stringify(copy),
+    }
+  } catch {
+    return undefined
   }
 }
 

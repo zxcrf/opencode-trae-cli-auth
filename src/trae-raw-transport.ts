@@ -203,7 +203,7 @@ export async function* streamTraeRawChat(
 }
 
 function findPartialToolBlockStart(text: string): number {
-  const tags = ['<opencode_tool_call>', '<tool_use>', '<tool_call>', '<tool_call ', '<tool>', '<tool_cell', '<invoke>', '</invoke>']
+  const tags = ['<opencode_tool_call>', '<tool_use>', '<tool_call>', '<tool_call ', '<tool>', '<tool_cell', '<invoke>', '</invoke>', '<bash>', '</bash>']
   const maxTagLength = Math.max(...tags.map((tag) => tag.length))
   for (let start = Math.max(0, text.length - maxTagLength + 1); start < text.length; start += 1) {
     const suffix = text.slice(start)
@@ -221,7 +221,9 @@ function findToolBlockStart(text: string): number {
   const toolCellStart = text.indexOf('<tool_cell')
   const invokeStart = text.indexOf('<invoke>')
   const brokenInvokeStart = text.indexOf('</invoke>')
-  return minFound(opencodeStart, xmlStart, compactStart, namedStart, kimiStart, toolCellStart, invokeStart, brokenInvokeStart)
+  const bashStart = text.indexOf('<bash>')
+  const brokenBashStart = text.indexOf('</bash>')
+  return minFound(opencodeStart, xmlStart, compactStart, namedStart, kimiStart, toolCellStart, invokeStart, brokenInvokeStart, bashStart, brokenBashStart)
 }
 
 function findToolBlockEnd(text: string, start: number): number {
@@ -244,6 +246,14 @@ function findToolBlockEnd(text: string, start: number): number {
   if (text.startsWith('<tool_use>', start)) {
     const end = text.indexOf('</tool_use>', start)
     return end < 0 ? -1 : end + '</tool_use>'.length
+  }
+  if (text.startsWith('<bash>', start)) {
+    const end = text.indexOf('</bash>', start)
+    return end < 0 ? -1 : end + '</bash>'.length
+  }
+  if (text.startsWith('</bash>', start)) {
+    const jsonStart = text.lastIndexOf('{', start)
+    return jsonStart >= 0 ? text.indexOf('</bash>', start) + '</bash>'.length : -1
   }
   if (text.startsWith('<tool>', start)) {
     const end = text.indexOf('</parameter>', start)

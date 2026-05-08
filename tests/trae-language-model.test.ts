@@ -609,6 +609,199 @@ cliPath: '/usr/bin/traecli',
     expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
   })
 
+  it('uses a completion judge before retrying an incomplete stopped response after tool results', async () => {
+    let requestCount = 0
+    const fetchMock = vi.fn(async () => new Response([
+      'event: output\ndata: {"response":"当前配置中 oh-my-opencode-slim 是通过插件名引用的，先确认安装方式和当前版本，再升级。","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"{\\"status\\":\\"incomplete\\",\\"reason\\":\\"the assistant promised more action but did not complete the task\\",\\"next_expectation\\":\\"tool_call\\"}","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"<opencode_tool_call>\\n{\\"id\\":\\"check-plugin\\",\\"name\\":\\"bash\\",\\"input\\":{\\"command\\":\\"cat ~/.config/opencode/oh-my-opencode-slim.json\\",\\"description\\":\\"Inspect the installed oh-my-opencode-slim plugin configuration\\"}}\\n</opencode_tool_call>","tool_calls":null}\n\n',
+    ][requestCount++] ?? '', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('GLM-5.1', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [
+        { role: 'user', content: [{ type: 'text', text: '升级本机opencode的 oh-my-opencode-slim 插件' }] },
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'probe-plugin', toolName: 'bash', input: { command: 'find ~/.config/opencode -name "*oh-my-opencode*"' } }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'probe-plugin', toolName: 'bash', output: { type: 'text', value: '/Users/liurui/.config/opencode/oh-my-opencode-slim\n/Users/liurui/.config/opencode/oh-my-opencode-slim.json\n' } }] },
+      ],
+      tools: [{
+        type: 'function',
+        name: 'bash',
+        inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } },
+      }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(JSON.stringify(JSON.parse(fetchMock.mock.calls[1][1].body).messages)).toContain('completion judge')
+    expect(JSON.stringify(JSON.parse(fetchMock.mock.calls[1][1].body).messages)).toContain('oh-my-opencode-slim')
+    expect(parts.some((p) => p.type === 'text-delta')).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"cat ~/.config/opencode/oh-my-opencode-slim.json","description":"Inspect the installed oh-my-opencode-slim plugin configuration"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('uses a completion judge to recover a stopped first turn into a tool call', async () => {
+    let requestCount = 0
+    const fetchMock = vi.fn(async () => new Response([
+      'event: output\ndata: {"response":"先了解一下当前插件的安装情况和来源。","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"{\\"status\\":\\"incomplete\\",\\"reason\\":\\"the user asked for an action and the assistant only stated a plan\\",\\"next_expectation\\":\\"tool_call\\"}","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"<opencode_tool_call>\\n{\\"id\\":\\"check-plugin\\",\\"name\\":\\"bash\\",\\"input\\":{\\"command\\":\\"find ~/.config/opencode -name \\\\\\"*oh-my-opencode*\\\\\\" -o -name \\\\\\"*slim*\\\\\\" 2>/dev/null | head -20\\",\\"description\\":\\"Locate the installed oh-my-opencode-slim plugin files\\"}}\\n</opencode_tool_call>","tool_calls":null}\n\n',
+    ][requestCount++] ?? '', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('GLM-5.1', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: '升级本机opencode的 oh-my-opencode-slim 插件' }] }],
+      tools: [{
+        type: 'function',
+        name: 'bash',
+        inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } },
+      }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(parts.some((p) => p.type === 'text-delta')).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"find ~/.config/opencode -name \\"*oh-my-opencode*\\" -o -name \\"*slim*\\" 2>/dev/null | head -20","description":"Locate the installed oh-my-opencode-slim plugin files"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('uses goal completion semantics for unfinished action text, not phrase-specific matching', async () => {
+    let requestCount = 0
+    const fetchMock = vi.fn(async () => new Response([
+      'event: output\ndata: {"response":"The installed version is 0.9.12 and the latest available version is 1.0.7. I need to reinstall with force.","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"```json\\n{\\"status\\":\\"incomplete\\",\\"reason\\":\\"the action has not been executed yet\\",\\"next_expectation\\":\\"tool_call\\"}\\n```","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"<opencode_tool_call>\\n{\\"id\\":\\"do-upgrade\\",\\"name\\":\\"bash\\",\\"input\\":{\\"command\\":\\"opencode plugin oh-my-opencode-slim --global --force\\",\\"description\\":\\"Force reinstall the requested OpenCode plugin\\"}}\\n</opencode_tool_call>","tool_calls":null}\n\n',
+    ][requestCount++] ?? '', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('GLM-5.1', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'Upgrade the local OpenCode plugin to the latest version.' }] }],
+      tools: [{
+        type: 'function',
+        name: 'bash',
+        inputSchema: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } },
+      }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(parts.some((p) => p.type === 'text-delta')).toBe(false)
+    expect(parts.find((p) => p.type === 'tool-call')).toMatchObject({
+      toolName: 'bash',
+      input: '{"command":"opencode plugin oh-my-opencode-slim --global --force","description":"Force reinstall the requested OpenCode plugin"}',
+    })
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'tool-calls' })
+  })
+
+  it('stops and emits the assistant text when the completion judge says the task is complete', async () => {
+    let requestCount = 0
+    const fetchMock = vi.fn(async () => new Response([
+      'event: output\ndata: {"response":"已升级完成，并验证当前版本是 1.2.3。","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"{\\"status\\":\\"complete\\",\\"reason\\":\\"the assistant reported completion and verification\\",\\"next_expectation\\":\\"final_answer\\"}","tool_calls":null}\n\n',
+    ][requestCount++] ?? '', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('GLM-5.1', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+    } as any)
+
+    const parts: any[] = []
+    for await (const part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: '升级本机opencode的 oh-my-opencode-slim 插件' }] }],
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' } } } }],
+    } as any)).stream as any) parts.push(part)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(parts.filter((p) => p.type === 'text-delta').map((p) => p.delta).join('')).toBe('已升级完成，并验证当前版本是 1.2.3。')
+    expect(parts.find((p) => p.type === 'tool-call')).toBeUndefined()
+    expect(parts.find((p) => p.type === 'finish')).toMatchObject({ finishReason: 'stop' })
+  })
+
+  it('forks the raw completion judge outside the main Trae session', async () => {
+    let requestCount = 0
+    const fetchMock = vi.fn(async () => new Response([
+      'event: output\ndata: {"response":"先了解一下当前插件的安装情况和来源。","tool_calls":null}\n\n',
+      'event: output\ndata: {"response":"{\\"status\\":\\"complete\\",\\"reason\\":\\"test\\",\\"next_expectation\\":\\"final_answer\\"}","tool_calls":null}\n\n',
+    ][requestCount++] ?? '', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { TraeLanguageModel } = await import('../src/trae-language-model.js')
+    const model = new TraeLanguageModel('GLM-5.1', {
+      traeRawBaseURL: 'https://api.enterprise.trae.cn',
+      traeRawApiKey: 'test-key',
+      enableToolCalling: true,
+      sessionId: 'main-session',
+    } as any)
+
+    for await (const _part of (await model.doStream({
+      inputFormat: 'prompt',
+      mode: { type: 'regular' },
+      prompt: [{ role: 'user', content: [{ type: 'text', text: '升级本机opencode的 oh-my-opencode-slim 插件' }] }],
+      tools: [{ type: 'function', name: 'bash', inputSchema: { type: 'object', properties: { command: { type: 'string' } } } }],
+    } as any)).stream as any) {
+      // drain
+    }
+
+    const mainBody = JSON.parse(fetchMock.mock.calls[0][1].body)
+    const judgeBody = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(mainBody.session_id).toBe('main-session')
+    expect(judgeBody.session_id).not.toBe('main-session')
+    expect(judgeBody.session_id).toContain('judge')
+  })
+
   it('stops the raw stream turn after a text tool_use so OpenCode executes the tool', async () => {
     const fetchMock = vi.fn(async () => new Response(
       [
